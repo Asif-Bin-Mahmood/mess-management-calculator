@@ -1,10 +1,19 @@
 import { validateClosing, validateTransaction } from '../domain/validate'
-import type { LedgerId, MonthClosing, Transaction } from '../domain/types'
-import { db as defaultDb, type AuditEntry, type MessDb } from './db'
+import {
+  DEFAULT_MEMBER_NAMES,
+  LEGACY_MEMBER_NAMES,
+  sameMemberNames,
+  validateMemberNames,
+  type LedgerId,
+  type MemberNames,
+  type MonthClosing,
+  type Transaction,
+} from '../domain/types'
+import { db as defaultDb, MEMBER_NAMES_KEY, type AuditEntry, type MessDb } from './db'
 
 export const BACKUP_APP = 'mess-ledger'
-/** v1: whole database, transactions + audit. v2: adds closings, scope and backupId. */
-export const BACKUP_SCHEMA_VERSION = 2
+/** v1: whole database, transactions + audit. v2: adds closings, scope and backupId. v3: adds member display names. */
+export const BACKUP_SCHEMA_VERSION = 3
 
 /** 'all' = both ledgers; otherwise a single ledger, which can only be restored into that ledger. */
 export type BackupScope = 'all' | LedgerId
@@ -18,6 +27,8 @@ export interface BackupFile {
   transactions: Transaction[]
   closings: MonthClosing[]
   audit: AuditEntry[]
+  /** Member display names (schema 3+). Ids in records never depend on them. */
+  memberNames?: MemberNames
 }
 
 export interface BackupSummary {
@@ -31,6 +42,7 @@ export interface BackupSummary {
   closings: number
   firstMonth: string | null
   lastMonth: string | null
+  memberNames?: MemberNames
 }
 
 export type BackupCheck = { ok: true; data: BackupFile; summary: BackupSummary } | { ok: false; errors: string[] }
@@ -42,7 +54,7 @@ function auditLedger(a: AuditEntry): LedgerId | undefined {
 }
 
 export async function createBackup(database: MessDb = defaultDb, now = new Date(), scope: BackupScope = 'all'): Promise<BackupFile> {
-  return database.transaction('r', database.transactions, database.closings, database.audit, async () => ({
+  return database.transaction('r', [database.transactions, database.closings, database.audit, database.meta], async () => ({
     app: BACKUP_APP,
     schemaVersion: BACKUP_SCHEMA_VERSION,
     backupId: crypto.randomUUID(),
@@ -53,6 +65,7 @@ export async function createBackup(database: MessDb = defaultDb, now = new Date(
     audit: (await database.audit.toArray())
       .filter((a) => scope === 'all' || auditLedger(a) === scope)
       .map(({ seq: _seq, ...rest }) => rest),
+    memberNames: { ...DEFAULT_MEMBER_NAMES, ...(((await database.meta.get(MEMBER_NAMES_KEY))?.value as MemberNames | undefined) ?? {}) },
   }))
 }
 
@@ -62,7 +75,7 @@ export function backupFileName(now = new Date(), scope: BackupScope = 'all'): st
   return `mess-ledger-backup-${part}${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}-${p(now.getHours())}${p(now.getMinutes())}.json`
 }
 
-const AUDIT_ACTIONS = new Set(['create', 'update', 'delete', 'restore', 'import', 'close', 'undo-close', 'undo-import'])
+const AUDIT_ACTIONS = new Set(['create', 'update', 'delete', 'restore', 'import', 'close', 'undo-close', 'undo-import', 'rename-members'])
 
 /** Parses and validates a backup file's text. Never touches the database. */
 export function checkBackup(text: string): BackupCheck {
@@ -90,6 +103,13 @@ export function checkBackup(text: string): BackupCheck {
   if (!Array.isArray(audit)) return { ok: false, errors: ['The audit log is malformed.'] }
   const backupId = b.schemaVersion === 1 ? `v1:${b.exportedAt ?? ''}:${b.transactions.length}` : b.backupId
   if (typeof backupId !== 'string' || backupId.length === 0 || backupId.length > 100) return { ok: false, errors: ['The backup id is missing.'] }
+  let memberNames: MemberNames | undefined
+  if (b.schemaVersion >= 3) {
+    if (typeof b.memberNames !== 'object' || b.memberNames === null) return { ok: false, errors: ['The backup has no member names.'] }
+    const v = validateMemberNames(b.memberNames as Record<string, unknown>)
+    if (Object.keys(v.errors).length) return { ok: false, errors: ['The backup contains invalid member names.'] }
+    memberNames = v.names
+  }
 
   const errors: string[] = []
   const ids = new Set<string>()
@@ -151,8 +171,10 @@ export function checkBackup(text: string): BackupCheck {
       transactions: txs,
       closings,
       audit: (audit as AuditEntry[]).map(({ seq: _seq, ...rest }) => rest),
+      ...(memberNames ? { memberNames } : {}),
     },
     summary: {
+      memberNames,
       scope,
       backupId,
       exportedAt,
@@ -212,36 +234,105 @@ interface RestoreUndo {
   backupId: string
   transactions: Transaction[]
   closings: MonthClosing[]
+  /** Member names before the restore (only when the restore changed them). */
+  memberNames?: MemberNames
 }
+
+/** Small companion record so the UI can show "Undo last restore" without loading the whole snapshot. */
+const RESTORE_UNDO_KEY = 'lastRestoreUndo'
+const RESTORE_UNDO_INFO_KEY = 'lastRestoreUndoInfo'
 
 const auditKey = (a: AuditEntry) => `${a.at}|${a.action}|${a.txId}`
 
+export interface RestoreProgress {
+  phase: 'preparing' | 'entries' | 'history' | 'finishing'
+  done: number
+  total: number
+}
+
+/** Rows written per request batch. Between batches the browser can repaint, so the screen never freezes. */
+const CHUNK = 200
+
+async function addInChunks<T>(table: { bulkAdd(rows: T[]): Promise<unknown> }, rows: T[], onChunk: (n: number) => void) {
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const part = rows.slice(i, i + CHUNK)
+    await table.bulkAdd(part)
+    onChunk(part.length)
+  }
+}
+
 /**
- * Replaces the records in the backup's scope (both ledgers, or only that one ledger), atomically.
- * The other ledger is never touched by a single-ledger restore. The device's audit history is kept and
- * merged with the backup's; the replaced records are kept so the restore can be undone.
+ * Member names a full restore should apply: the backup's own names (schema 3), or — for backups made
+ * before names were configurable — the original names, but only if this installation was never renamed.
  */
-export async function restoreBackup(data: BackupFile, database: MessDb = defaultDb, now = Date.now()): Promise<void> {
+function namesForRestore(data: BackupFile, current: MemberNames, stored: boolean): MemberNames | null {
+  if (data.scope !== 'all') return null
+  if (data.memberNames) return data.memberNames
+  const untouched = !stored || sameMemberNames(current, DEFAULT_MEMBER_NAMES)
+  return untouched ? { ...LEGACY_MEMBER_NAMES } : null
+}
+
+/**
+ * Replaces the records in the backup's scope (both ledgers, or only that one ledger) in ONE IndexedDB
+ * transaction: if anything fails, nothing is changed. Rows are written in batches so the interface stays
+ * responsive and progress can be shown. The other ledger is never touched by a single-ledger restore.
+ * The device's audit history is kept and merged with the backup's; the replaced records are kept so the
+ * restore can be undone.
+ */
+export async function restoreBackup(
+  data: BackupFile,
+  database: MessDb = defaultDb,
+  now = Date.now(),
+  onProgress: (p: RestoreProgress) => void = () => {},
+): Promise<void> {
   const scope = data.scope
   for (const t of data.transactions) if (!inScope(scope, t.ledger)) throw new Error('Backup contains records outside its scope')
   for (const c of data.closings) if (!inScope(scope, c.ledger)) throw new Error('Backup contains records outside its scope')
 
   await database.transaction('rw', [database.transactions, database.closings, database.audit, database.meta], async () => {
-    const oldTxs = (await database.transactions.toArray()).filter((t) => inScope(scope, t.ledger))
-    const oldClosings = (await database.closings.toArray()).filter((c) => inScope(scope, c.ledger))
-    const undo: RestoreUndo = { scope, at: now, backupId: data.backupId, transactions: oldTxs, closings: oldClosings }
-    await database.meta.put({ key: 'lastRestoreUndo', value: undo })
+    onProgress({ phase: 'preparing', done: 0, total: data.transactions.length })
+    const oldTxs = scope === 'all' ? await database.transactions.toArray() : await database.transactions.where('ledger').equals(scope).toArray()
+    const oldClosings = scope === 'all' ? await database.closings.toArray() : await database.closings.where('ledger').equals(scope).toArray()
+    const storedNames = (await database.meta.get(MEMBER_NAMES_KEY))?.value as MemberNames | undefined
+    const currentNames = { ...DEFAULT_MEMBER_NAMES, ...(storedNames ?? {}) }
+    const newNames = namesForRestore(data, currentNames, !!storedNames)
+    const namesChange = newNames !== null && !sameMemberNames(newNames, currentNames)
 
-    await database.transactions.bulkDelete(oldTxs.map((t) => t.id))
-    await database.closings.bulkDelete(oldClosings.map((c) => c.id))
-    // An id that exists in the other ledger cannot be restored here without touching that ledger.
-    const clash = await database.transactions.bulkGet(data.transactions.map((t) => t.id))
-    if (clash.some((t) => t !== undefined)) throw new Error('A record in this backup has the same id as a record in the other ledger.')
-    await database.transactions.bulkAdd(data.transactions)
+    const undo: RestoreUndo = { scope, at: now, backupId: data.backupId, transactions: oldTxs, closings: oldClosings }
+    if (namesChange) undo.memberNames = currentNames
+    await database.meta.put({ key: RESTORE_UNDO_KEY, value: undo })
+    await database.meta.put({ key: RESTORE_UNDO_INFO_KEY, value: { scope, at: now } })
+
+    if (scope === 'all') {
+      await database.transactions.clear()
+      await database.closings.clear()
+    } else {
+      await database.transactions.where('ledger').equals(scope).delete()
+      await database.closings.where('ledger').equals(scope).delete()
+      // An id that exists in the other ledger cannot be restored here without touching that ledger.
+      const otherIds = new Set(await database.transactions.toCollection().primaryKeys())
+      if (data.transactions.some((t) => otherIds.has(t.id))) {
+        throw new Error('A record in this backup has the same id as a record in the other ledger.')
+      }
+    }
+
+    let done = 0
+    await addInChunks(database.transactions, data.transactions, (n) => {
+      done += n
+      onProgress({ phase: 'entries', done, total: data.transactions.length })
+    })
     await database.closings.bulkAdd(data.closings)
 
-    const existing = new Set((await database.audit.toArray()).map(auditKey))
-    await database.audit.bulkAdd(data.audit.filter((a) => !existing.has(auditKey(a))))
+    const existingAudit = (await database.audit.count()) ? new Set((await database.audit.toArray()).map(auditKey)) : new Set<string>()
+    const newAudit = data.audit.filter((a) => !existingAudit.has(auditKey(a)))
+    let auditDone = 0
+    await addInChunks(database.audit, newAudit, (n) => {
+      auditDone += n
+      onProgress({ phase: 'history', done: auditDone, total: newAudit.length })
+    })
+
+    onProgress({ phase: 'finishing', done: 0, total: 0 })
+    if (namesChange) await database.meta.put({ key: MEMBER_NAMES_KEY, value: newNames })
     await database.audit.add({
       at: now,
       action: 'import',
@@ -256,21 +347,28 @@ export async function restoreBackup(data: BackupFile, database: MessDb = default
 }
 
 export async function getRestoreUndo(database: MessDb = defaultDb): Promise<{ scope: BackupScope; at: number } | null> {
-  const u = (await database.meta.get('lastRestoreUndo'))?.value as RestoreUndo | undefined
+  const info = (await database.meta.get(RESTORE_UNDO_INFO_KEY))?.value as { scope: BackupScope; at: number } | undefined
+  if (info) return info
+  // Restores made before the info record existed.
+  const u = (await database.meta.get(RESTORE_UNDO_KEY))?.value as RestoreUndo | undefined
   return u ? { scope: u.scope, at: u.at } : null
 }
 
-/** Puts back the records replaced by the last restore (same scope only). */
+/** Puts back the records replaced by the last restore (same scope only), and the member names if it changed them. */
 export async function undoLastRestore(database: MessDb = defaultDb, now = Date.now()): Promise<BackupScope> {
   return database.transaction('rw', [database.transactions, database.closings, database.audit, database.meta], async () => {
-    const u = (await database.meta.get('lastRestoreUndo'))?.value as RestoreUndo | undefined
+    const u = (await database.meta.get(RESTORE_UNDO_KEY))?.value as RestoreUndo | undefined
     if (!u) throw new Error('There is no restore to undo.')
-    const curTxs = (await database.transactions.toArray()).filter((t) => inScope(u.scope, t.ledger))
-    const curClosings = (await database.closings.toArray()).filter((c) => inScope(u.scope, c.ledger))
-    await database.transactions.bulkDelete(curTxs.map((t) => t.id))
-    await database.closings.bulkDelete(curClosings.map((c) => c.id))
-    await database.transactions.bulkAdd(u.transactions)
+    if (u.scope === 'all') {
+      await database.transactions.clear()
+      await database.closings.clear()
+    } else {
+      await database.transactions.where('ledger').equals(u.scope).delete()
+      await database.closings.where('ledger').equals(u.scope).delete()
+    }
+    await addInChunks(database.transactions, u.transactions, () => {})
     await database.closings.bulkAdd(u.closings)
+    if (u.memberNames) await database.meta.put({ key: MEMBER_NAMES_KEY, value: u.memberNames })
     await database.audit.add({
       at: now,
       action: 'undo-import',
@@ -278,7 +376,8 @@ export async function undoLastRestore(database: MessDb = defaultDb, now = Date.n
       ledger: u.scope === 'all' ? undefined : u.scope,
       note: `undid restore of backup ${u.backupId}`,
     })
-    await database.meta.delete('lastRestoreUndo')
+    await database.meta.delete(RESTORE_UNDO_KEY)
+    await database.meta.delete(RESTORE_UNDO_INFO_KEY)
     return u.scope
   })
 }

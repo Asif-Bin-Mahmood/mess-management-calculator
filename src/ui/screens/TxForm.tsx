@@ -4,7 +4,7 @@ import { formatTaka, parseTaka, poishaToInput } from '../../domain/money'
 import { currentMonth, dayLabel, isValidDate, lastDayOfMonth, monthLabel, monthOf, toDateKey } from '../../domain/month'
 import {
   ledgerName,
-  MEMBERS,
+  members,
   memberName,
   txTypeLabel,
   UTILITY_CATEGORIES,
@@ -21,6 +21,7 @@ import { useMutate } from '../useMutate'
 import { EmptyState, TopBar } from '../common'
 import { useToast, type ConfirmOptions } from '../context'
 import { goBack } from '../hooks'
+import { useLeaveGuard } from '../backNav'
 import { Icon } from '../icons'
 
 type Kind = 'in' | 'out'
@@ -64,6 +65,11 @@ function FormBody({ ledger, existing, initialKind, month }: { ledger: LedgerId; 
   const [description, setDescription] = useState(existing?.description ?? '')
   const [errors, setErrors] = useState<TxErrors>({})
   const [busy, setBusy] = useState(false)
+  const [i0] = useState(() => ({ kind, refund, amount, memberId, category, date, description }))
+  const dirty =
+    !busy &&
+    (kind !== i0.kind || refund !== i0.refund || amount !== i0.amount || memberId !== i0.memberId || category !== i0.category || date !== i0.date || description !== i0.description)
+  useLeaveGuard(dirty, existing ? 'changes' : 'this entry')
 
   useEffect(() => {
     if (!existing) amountRef.current?.focus()
@@ -198,7 +204,7 @@ function FormBody({ ledger, existing, initialKind, month }: { ledger: LedgerId; 
           <fieldset className="field">
             <legend className="field-label">{refund ? 'Returned to' : 'Paid by'}</legend>
             <div className="choice-grid choice-4" aria-describedby={errors.memberId ? 'err-memberId' : undefined}>
-              {MEMBERS.map((m) => (
+              {members().map((m) => (
                 <label key={m.id} className={`choice ${memberId === m.id ? 'on' : ''}`}>
                   <input type="radio" name="member" value={m.id} checked={memberId === m.id} onChange={() => setMemberId(m.id)} />
                   <span className={`avatar avatar-${m.id}`} aria-hidden="true">

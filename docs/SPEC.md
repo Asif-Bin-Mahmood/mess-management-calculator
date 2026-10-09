@@ -1,6 +1,6 @@
 # Mess Ledger — implementation specification
 
-Offline-first PWA (Android-installable) for a four-member mess: **Asif, Dipu, Yusha, Ovi**.
+Offline-first PWA (Android-installable) for a four-member mess. Members have permanent internal IDs and user-editable display names (see *Member names*).
 One phone, no backend, no auth, no sync, no analytics.
 
 ## Stack
@@ -38,7 +38,7 @@ Amounts are positive integer **poisha**; a transaction's month is derived from i
 Per ledger and month:
 
 - cash: `closingCash = openingCash + Σcontributions − ΣmemberRefunds − Σexpenses + ΣexpenseRefunds`
-- `share[m]`: `base = floor(totalSpent/4)`, the 0–3 leftover poisha go one each in the order Asif → Dipu → Yusha → Ovi
+- `share[m]`: `base = floor(totalSpent/4)`, the 0–3 leftover poisha go one each in the fixed member order (Member 1 → 2 → 3 → 4)
   starting at `monthIndex mod 4`; shares always sum to totalSpent.
 - member balance: `closing[m] = opening[m] + netContribution[m] − share[m]`;
   positive = **Will receive**, negative = **Due**.
@@ -90,18 +90,30 @@ preview shows how opening and current balances change before confirming. Persist
 Dexie database `mess-ledger`:
 - v1: `transactions`, `audit`, `meta`
 - v2: adds `closings` (`id, ledger, [ledger+sourceMonth], createdAt`). Upgrade keeps all v1 data.
+- v3: no schema change; an install that already has records keeps its original member names (stored in `meta`).
 
 Deletion is a soft delete, restorable. Every create/update/delete/restore/close/undo/import is in the audit log.
 Historical edits show their carry-forward impact and require confirmation.
 
 ## Backup & restore (optional, not needed for month closing)
 
-JSON v2: `{ app, schemaVersion: 2, backupId, exportedAt, scope: 'all'|'utilities'|'bazar', transactions, closings, audit }`.
-v1 files are accepted as full backups. Validation covers schema version, ledger identity (every record must
-match a single-ledger scope), member ids, amounts, dates, closings, duplicate ids and duplicate closings.
+JSON v3: `{ app, schemaVersion: 3, backupId, exportedAt, scope: 'all'|'utilities'|'bazar', memberNames, transactions, closings, audit }`.
+v1 (full) and v2 files are still accepted. Validation covers schema version, ledger identity (every record must
+match a single-ledger scope), member ids and names, amounts, dates, closings, duplicate ids and duplicate closings.
 Restore previews the content, detects an identical state, a previously restored backup (by `backupId`) and
-local changes newer than the backup; it replaces only the records in scope, merges audit history, and keeps
-the replaced records so the last restore can be undone.
+local changes newer than the backup. Nothing is deleted before validation passes and the user confirms.
+
+The restore runs in one IndexedDB transaction: it clears only the records in scope, adds the backup's
+records in batches of 200 (reporting progress so the UI stays responsive), merges audit history, and keeps
+the replaced records so the last restore can be undone. Any failure rolls the whole transaction back.
+A full backup restores its member names; a single-ledger restore never changes them.
+
+## Member names
+
+Members have permanent internal IDs (`asif`, `dipu`, `yusha`, `ovi`, historical and opaque) that all records,
+shares and balances refer to, and display names stored in `meta.memberNames`. New installs start with
+*Member 1–4*. Names are trimmed, 1–24 characters and unique (case-insensitive). A rename is audited and
+never changes any record; reports and screens show the current names.
 
 ## Reports
 

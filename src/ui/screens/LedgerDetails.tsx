@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import type { MonthSummary } from '../../domain/ledger'
 import { formatTaka } from '../../domain/money'
 import { addMonths, monthLabel, shortMonthLabel } from '../../domain/month'
-import { closingMethodLabel, MEMBERS, memberName } from '../../domain/types'
+import { closingMethodLabel, members, memberName } from '../../domain/types'
 import { reconciliationLines, type DashboardAlert } from '../../report/reportModel'
 
 const when = (ms: number) => new Date(ms).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
@@ -112,7 +112,7 @@ function CorrectionDetails({ s }: { s: MonthSummary }) {
           </tr>
         </thead>
         <tbody>
-          {MEMBERS.map((m) => (
+          {members().map((m) => (
             <tr key={m.id} className={o.memberCorrections[m.id] !== 0 ? 'changed' : ''}>
               <th scope="row">{m.name}</th>
               <td className="num">{formatTaka(snap.closingBalances[m.id])}</td>

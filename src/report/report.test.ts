@@ -1,4 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
+import { LEGACY_MEMBER_NAMES, setMemberNames } from '../domain/types'
+
+// Display names used in these tests (ids are fixed; names are configurable).
+beforeAll(() => setMemberNames(LEGACY_MEMBER_NAMES))
 import { tx } from '../domain/testUtils'
 import { buildPdf } from './pdf'
 import { balanceLabel, buildReport, roundingNote, txCashEffect } from './reportModel'

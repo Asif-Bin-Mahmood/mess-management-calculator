@@ -1,7 +1,7 @@
 import Dexie, { type EntityTable } from 'dexie'
-import type { LedgerId, MonthClosing, Transaction } from '../domain/types'
+import { LEGACY_MEMBER_NAMES, type LedgerId, type MonthClosing, type Transaction } from '../domain/types'
 
-export type AuditAction = 'create' | 'update' | 'delete' | 'restore' | 'import' | 'close' | 'undo-close' | 'undo-import'
+export type AuditAction = 'create' | 'update' | 'delete' | 'restore' | 'import' | 'close' | 'undo-close' | 'undo-import' | 'rename-members'
 
 export interface AuditEntry {
   seq?: number
@@ -23,6 +23,7 @@ export interface MetaEntry {
 }
 
 export const DB_NAME = 'mess-ledger'
+export const MEMBER_NAMES_KEY = 'memberNames'
 
 export class MessDb extends Dexie {
   transactions!: EntityTable<Transaction, 'id'>
@@ -31,7 +32,7 @@ export class MessDb extends Dexie {
   closings!: EntityTable<MonthClosing, 'id'>
 
   constructor(name = DB_NAME) {
-    super(name)
+    super(name, { cache: 'disabled' })
     // Schema history. Never edit a released version: add db.version(n + 1) with an
     // .upgrade() step instead, so data survives app updates.
     this.version(1).stores({
@@ -44,7 +45,19 @@ export class MessDb extends Dexie {
     this.version(2).stores({
       closings: 'id, ledger, [ledger+sourceMonth], createdAt',
     })
+    // v3: member display names became configurable (meta key 'memberNames'). Installations that already
+    // hold records keep the names they have always shown; fresh installations start with neutral names.
+    this.version(3)
+      .stores({})
+      .upgrade(async (tx) => {
+        const hasData = (await tx.table('transactions').count()) + (await tx.table('closings').count()) > 0
+        if (hasData && !(await tx.table('meta').get(MEMBER_NAMES_KEY))) {
+          await tx.table('meta').put({ key: MEMBER_NAMES_KEY, value: { ...LEGACY_MEMBER_NAMES } })
+        }
+      })
   }
 }
 
+// The live-query cache is disabled (constructor option): queries simply re-run after each commit, so large
+// bulk writes such as a backup restore are not also applied to cached query results on the main thread.
 export const db = new MessDb()

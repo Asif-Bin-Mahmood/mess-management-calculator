@@ -1,5 +1,5 @@
 import { createContext, useContext, type ReactNode } from 'react'
-import type { MonthClosing, Transaction } from '../domain/types'
+import type { MemberNames, MonthClosing, Transaction } from '../domain/types'
 
 export interface ConfirmOptions {
   title: string
@@ -27,6 +27,10 @@ export type ToastFn = (t: Omit<Toast, 'id'>) => void
 export interface AppState {
   txs: Transaction[] | undefined
   closings: MonthClosing[]
+  /** Current member display names (ids never change). */
+  memberNames: MemberNames
+  /** False until names are saved on this device (fresh installation). */
+  memberNamesSet: boolean
   month: string
   setMonth: (m: string) => void
   minMonth: string

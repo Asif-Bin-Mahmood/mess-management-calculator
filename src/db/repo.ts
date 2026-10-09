@@ -1,8 +1,8 @@
 import { analyzeCorrection, type CorrectionImpact } from '../domain/ledger'
 import { currentMonth, monthOf } from '../domain/month'
-import type { Transaction } from '../domain/types'
+import { DEFAULT_MEMBER_NAMES, validateMemberNames, type MemberId, type MemberNames, type Transaction } from '../domain/types'
 import { normalizeTxInput, validateTxInput, type TxErrors, type TxInput } from '../domain/validate'
-import { db as defaultDb, type MessDb } from './db'
+import { db as defaultDb, MEMBER_NAMES_KEY, type MessDb } from './db'
 
 export type Mutation =
   | { kind: 'create'; input: TxInput }
@@ -99,4 +99,27 @@ export async function requestPersistentStorage(): Promise<boolean | null> {
   } catch {
     return null
   }
+}
+
+/* ───────────── Member display names ───────────── */
+
+/** Stored display names, or the neutral defaults for a fresh installation. */
+export async function loadMemberNames(database: MessDb = defaultDb): Promise<MemberNames> {
+  const v = (await database.meta.get(MEMBER_NAMES_KEY))?.value as Partial<MemberNames> | undefined
+  return { ...DEFAULT_MEMBER_NAMES, ...(v ?? {}) }
+}
+
+/**
+ * Renames members. Only display names change: transactions, balances and closings refer to the
+ * permanent member ids and are not touched. Recorded in the audit trail.
+ */
+export async function saveMemberNames(raw: Partial<Record<MemberId, string>>, database: MessDb = defaultDb, now = Date.now()): Promise<MemberNames> {
+  const { names, errors } = validateMemberNames(raw)
+  if (Object.keys(errors).length) throw new Error(Object.values(errors)[0])
+  return database.transaction('rw', database.meta, database.audit, async () => {
+    const before = await loadMemberNames(database)
+    await database.meta.put({ key: MEMBER_NAMES_KEY, value: names })
+    await database.audit.add({ at: now, action: 'rename-members', txId: 'members', note: JSON.stringify({ before, after: names }) })
+    return names
+  })
 }

@@ -1966,3 +1966,84 @@ body:has(.app-form) .toasts {
   height: 22px;
   accent-color: var(--primary);
 }
+
+/* ───────── Restore progress overlay ───────── */
+
+.busy-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(10 15 12 / 45%);
+}
+
+.busy-card {
+  width: 100%;
+  max-width: 340px;
+  padding: 20px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 25%);
+}
+
+.busy-title {
+  font-weight: 800;
+  font-size: 17px;
+}
+
+.busy-bar {
+  height: 8px;
+  margin: 14px 0 10px;
+  border-radius: 99px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+
+.busy-bar span {
+  display: block;
+  height: 100%;
+  background: var(--primary);
+  border-radius: 99px;
+  transition: width 0.2s;
+}
+
+.busy-bar span.indeterminate {
+  animation: busy-slide 1.2s ease-in-out infinite;
+}
+
+@keyframes busy-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(340%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .busy-bar span.indeterminate {
+    animation: none;
+  }
+}
+
+.busy-detail {
+  font-size: 14px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.member-names {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.notice-neutral {
+  background: var(--surface);
+  border-color: var(--line);
+  color: var(--ink);
+}

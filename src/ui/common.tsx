@@ -2,10 +2,11 @@ import { useRef, type ReactNode } from 'react'
 import type { ClosingEffectChange, CorrectionImpact } from '../domain/ledger'
 import { formatTaka } from '../domain/money'
 import { addMonths, monthLabel, shortMonthLabel } from '../domain/month'
-import { closingMethodLabel, MEMBERS, memberName, type LedgerId, type MemberId } from '../domain/types'
+import { closingMethodLabel, members, memberName, type LedgerId, type MemberId } from '../domain/types'
 import type { MemberMap } from '../domain/ledger'
 import { balanceStatus } from '../report/reportModel'
-import { goBack } from './hooks'
+import { performBack } from './backNav'
+import { navigate } from './hooks'
 import { Icon, type IconName } from './icons'
 
 export function Money({ value, sign, className }: { value: number; sign?: boolean; className?: string }) {
@@ -91,7 +92,7 @@ export function TopBar({ title, back, actions, ledger }: { title: string; back?:
   return (
     <header className={`topbar ${ledger ? `topbar-${ledger}` : ''}`}>
       {back !== undefined && (
-        <button type="button" className="icon-btn" onClick={() => goBack(back)} aria-label="Back">
+        <button type="button" className="icon-btn" onClick={() => void performBack('button').then((handled) => handled || navigate(back, { replace: true }))} aria-label="Back">
           <Icon name="back" />
         </button>
       )}
@@ -175,7 +176,7 @@ export function OpeningTable({ before, after, cashBefore, cashAfter, beforeLabel
         </tr>
       </thead>
       <tbody>
-        {MEMBERS.map((m) => (
+        {members().map((m) => (
           <tr key={m.id} className={before[m.id] !== after[m.id] ? 'changed' : ''}>
             <th scope="row">{m.name}</th>
             <td className="num">{formatTaka(before[m.id])}</td>
@@ -202,7 +203,7 @@ function ClosedMonthEffect({ e }: { e: ClosingEffectChange }) {
       ? 'Balances are carried forward, so the change flows into the next month.'
       : `The ${e.closing.method === 'manual' ? 'verified opening' : e.closing.settlementKind === 'waived' ? 'waiver' : 'settlement'} recorded at closing stays as it was; the change is carried into ${next} on top of it.`
   const rows = [
-    ...MEMBERS.map((m) => ({ key: m.id, name: m.name, orig: e.original.balances[m.id], now: e.closingAfter.balances[m.id], open: e.openingAfter.balances[m.id], openBefore: e.openingBefore.balances[m.id] })),
+    ...members().map((m) => ({ key: m.id, name: m.name, orig: e.original.balances[m.id], now: e.closingAfter.balances[m.id], open: e.openingAfter.balances[m.id], openBefore: e.openingBefore.balances[m.id] })),
     { key: 'cash', name: 'Cash', orig: e.original.cash, now: e.closingAfter.cash, open: e.openingAfter.cash, openBefore: e.openingBefore.cash },
   ]
   return (

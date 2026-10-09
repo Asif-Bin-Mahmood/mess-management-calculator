@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
+import { LEGACY_MEMBER_NAMES, setMemberNames } from '../domain/types'
+
+beforeAll(() => setMemberNames(LEGACY_MEMBER_NAMES))
 import { buildClosing } from '../domain/ledger'
 import { tx } from '../domain/testUtils'
 import type { MonthClosing, Transaction } from '../domain/types'

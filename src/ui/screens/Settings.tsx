@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { backupFileName, checkBackup, createBackup, eraseAll, getRestoreUndo, importStatus, restoreBackup, undoLastRestore, type BackupScope } from '../../db/backup'
+import { backupFileName, checkBackup, createBackup, eraseAll, getRestoreUndo, importStatus, restoreBackup, undoLastRestore, type BackupScope, type RestoreProgress } from '../../db/backup'
 import { lastBackupAtQuery, restoreUndoQuery } from '../queries'
-import { requestPersistentStorage, setMeta } from '../../db/repo'
+import { requestPersistentStorage, saveMemberNames, setMeta } from '../../db/repo'
 import { formatTaka } from '../../domain/money'
 import { dayLabel, monthLabel } from '../../domain/month'
-import { ledgerName } from '../../domain/types'
+import { ledgerName, MEMBER_IDS, MAX_MEMBER_NAME, sameMemberNames, validateMemberNames, type MemberId } from '../../domain/types'
 import { canShareFiles, isNativeApp, saveFile, shareFile } from '../../report/export'
 import { txTitle } from '../../report/reportModel'
 import { useApp } from '../context'
@@ -14,9 +14,10 @@ import { useConfirm, useToast } from '../context'
 import { useLive } from '../hooks'
 import { Icon } from '../icons'
 import { useInstallPrompt } from '../pwa'
+import { blockBack, useLeaveGuard } from '../backNav'
 
 export function Settings() {
-  const { txs } = useApp()
+  const { txs, memberNames } = useApp()
   const toast = useToast()
   const confirm = useConfirm()
   const mutate = useMutate()
@@ -26,6 +27,10 @@ export function Settings() {
   const [usage, setUsage] = useState<string | null>(null)
   const install = useInstallPrompt()
   const [scope, setScope] = useState<BackupScope>('all')
+  const [restoring, setRestoring] = useState<RestoreProgress | { phase: 'checking'; done: number; total: number } | null>(null)
+  const restoringRef = useRef(false)
+  const restoringNow = restoring !== null
+  useEffect(() => (restoringNow ? blockBack() : undefined), [restoringNow])
   const restoreUndo = useLive(restoreUndoQuery)
 
   useEffect(() => {
@@ -70,6 +75,30 @@ export function Settings() {
   }
 
   async function restoreFrom(file: File) {
+    if (restoringRef.current) return // one restore at a time
+    restoringRef.current = true
+    setRestoring({ phase: 'checking', done: 0, total: 0 })
+    try {
+      await restoreFlow(file)
+    } catch (e) {
+      await confirm({
+        title: 'Restore failed',
+        body: (
+          <p>
+            Your existing data was not changed. {e instanceof Error ? e.message : String(e)}
+          </p>
+        ),
+        confirmLabel: 'OK',
+        cancelLabel: null,
+      })
+    } finally {
+      restoringRef.current = false
+      setRestoring(null)
+    }
+  }
+
+  async function restoreFlow(file: File) {
+    await nextFrame() // let the overlay paint before reading and validating the file
     const text = await file.text()
     const check = checkBackup(text)
     if (!check.ok) {
@@ -131,6 +160,12 @@ export function Settings() {
               <dt>Months</dt>
               <dd>{s.firstMonth ? `${monthLabel(s.firstMonth)} – ${monthLabel(s.lastMonth!)}` : '—'}</dd>
             </div>
+            {s.scope === 'all' && s.memberNames && !sameMemberNames(s.memberNames, memberNames) && (
+              <div>
+                <dt>Member names</dt>
+                <dd>{MEMBER_IDS.map((id) => s.memberNames![id]).join(', ')}</dd>
+              </div>
+            )}
           </dl>
           {status.alreadyImportedAt !== null && (
             <p className="warn">
@@ -159,12 +194,11 @@ export function Settings() {
       danger: true,
     })
     if (!ok) return
-    try {
-      await restoreBackup(check.data)
-      toast({ message: `Restored ${s.transactions} entries (${scopeName(s.scope)})`, action: { label: 'Undo', run: () => void undoRestore() } })
-    } catch (e) {
-      toast({ message: `Restore failed, nothing changed: ${e instanceof Error ? e.message : String(e)}`, tone: 'error' })
-    }
+    setRestoring({ phase: 'preparing', done: 0, total: s.transactions })
+    await nextFrame()
+    // One transaction: on any failure nothing is written and the error is shown by restoreFrom.
+    await restoreBackup(check.data, undefined, Date.now(), (p) => setRestoring(p))
+    toast({ message: `Restored ${s.transactions} entries (${scopeName(s.scope)})`, action: { label: 'Undo', run: () => void undoRestore() } })
   }
 
   async function undoRestore() {
@@ -206,6 +240,9 @@ export function Settings() {
   return (
     <div className="screen">
       <TopBar title="Backup & settings" />
+      {restoring && <RestoreOverlay p={restoring} />}
+
+      <MembersCard />
 
       <section className="card" aria-labelledby="bk-h">
         <div className="card-head">
@@ -259,7 +296,7 @@ export function Settings() {
             if (f) void restoreFrom(f)
           }}
         />
-        <button type="button" className="btn btn-tonal" onClick={() => fileInput.current?.click()}>
+        <button type="button" className="btn btn-tonal" onClick={() => fileInput.current?.click()} disabled={!!restoring}>
           <Icon name="upload" size={18} /> Choose backup file
         </button>
         {restoreUndo && (
@@ -376,5 +413,104 @@ export function Settings() {
         </button>
       </section>
     </div>
+  )
+}
+
+// A short timer (not requestAnimationFrame, which never fires while the screen is off or the app is in the
+// background) lets the overlay paint before heavy work starts.
+const nextFrame = () => new Promise<void>((r) => setTimeout(r, 32))
+
+const PHASE_LABEL: Record<string, string> = {
+  checking: 'Checking backup…',
+  preparing: 'Preparing…',
+  entries: 'Restoring entries',
+  history: 'Restoring history',
+  finishing: 'Finishing…',
+}
+
+/** Blocks the screen during a restore so nothing else can change the data meanwhile. */
+function RestoreOverlay({ p }: { p: { phase: string; done: number; total: number } }) {
+  const pct = p.total > 0 ? Math.round((p.done / p.total) * 100) : null
+  return (
+    <div className="busy-overlay" role="alertdialog" aria-modal="true" aria-labelledby="busy-title" aria-describedby="busy-detail">
+      <div className="busy-card">
+        <p id="busy-title" className="busy-title">
+          {PHASE_LABEL[p.phase] ?? 'Working…'}
+        </p>
+        <div className="busy-bar" aria-hidden="true">
+          <span style={{ width: pct === null ? '30%' : `${pct}%` }} className={pct === null ? 'indeterminate' : ''} />
+        </div>
+        <p id="busy-detail" className="busy-detail" aria-live="polite">
+          {pct !== null ? `${p.done.toLocaleString('en-IN')} of ${p.total.toLocaleString('en-IN')}` : 'Keep the app open.'}
+        </p>
+      </div>
+    </div>
+  )
+}
+
+/** Rename the four members. Only display names change; records keep their permanent member ids. */
+function MembersCard() {
+  const { memberNames } = useApp()
+  const toast = useToast()
+  const [draft, setDraft] = useState<Record<MemberId, string>>(memberNames)
+  const [errors, setErrors] = useState<Partial<Record<MemberId, string>>>({})
+  const [busy, setBusy] = useState(false)
+  const [lastSaved, setLastSaved] = useState(memberNames)
+  if (!sameMemberNames(lastSaved, memberNames)) {
+    // Names changed elsewhere (e.g. a restore): show the new ones.
+    setLastSaved(memberNames)
+    setDraft(memberNames)
+  }
+  const changed = MEMBER_IDS.some((id) => draft[id].trim() !== memberNames[id])
+  useLeaveGuard(changed, 'name changes')
+
+  async function save() {
+    const { errors: errs } = validateMemberNames(draft)
+    setErrors(errs)
+    if (Object.keys(errs).length) return
+    setBusy(true)
+    try {
+      await saveMemberNames(draft)
+      toast({ message: 'Member names saved' })
+    } catch (e) {
+      toast({ message: e instanceof Error ? e.message : String(e), tone: 'error' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="card" aria-labelledby="mem-h">
+      <div className="card-head">
+        <h2 id="mem-h" className="card-title">
+          Members
+        </h2>
+      </div>
+      <p className="card-text">Names shown in both ledgers and in reports. Renaming never changes amounts, balances or history.</p>
+      <div className="member-names">
+        {MEMBER_IDS.map((id, i) => (
+          <label key={id} className="field">
+            <span className="field-label">Member {i + 1}</span>
+            <input
+              className="input"
+              value={draft[id]}
+              maxLength={MAX_MEMBER_NAME}
+              autoComplete="off"
+              onChange={(e) => setDraft((d) => ({ ...d, [id]: e.target.value }))}
+              aria-invalid={!!errors[id]}
+              aria-describedby={errors[id] ? `mem-err-${id}` : undefined}
+            />
+            {errors[id] && (
+              <span className="field-error" id={`mem-err-${id}`}>
+                {errors[id]}
+              </span>
+            )}
+          </label>
+        ))}
+      </div>
+      <button type="button" className="btn btn-primary" onClick={save} disabled={!changed || busy}>
+        Save names
+      </button>
+    </section>
   )
 }

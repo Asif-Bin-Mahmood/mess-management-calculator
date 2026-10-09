@@ -3,12 +3,13 @@ import { applyClosing, ClosingError } from '../../db/closing'
 import { buildClosing, canClose, computeLedgerMonth, monthClosingStatus, previewClosing, type ClosingInput, type MemberMap, type MonthSummary } from '../../domain/ledger'
 import { formatTaka, parseTaka, poishaToInput } from '../../domain/money'
 import { addMonths, currentMonth, monthLabel, shortMonthLabel } from '../../domain/month'
-import { closingMethodLabel, ledgerName, MEMBERS, memberName, type ClosingMethod, type LedgerId, type MemberId, type SettlementKind } from '../../domain/types'
+import { closingMethodLabel, ledgerName, members, memberName, type ClosingMethod, type LedgerId, type MemberId, type SettlementKind } from '../../domain/types'
 import { MAX_DESCRIPTION } from '../../domain/validate'
 import { BalanceTag, EmptyState, Money, OpeningTable, TopBar } from '../common'
 import { runUndo } from '../closingFlow'
 import { useApp, useConfirm, useToast } from '../context'
 import { goBack, navigate } from '../hooks'
+import { useLeaveGuard } from '../backNav'
 import { Icon } from '../icons'
 
 const availableLabel = (date: string) =>
@@ -144,15 +145,16 @@ export function CloseMonth({ ledger, month }: { ledger: LedgerId; month: string 
   const [balSign, setBalSign] = useState(() => Object.fromEntries(source.members.map((m) => [m.memberId, m.closing < 0 ? -1 : 1])) as Record<MemberId, Sign>)
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
+  useLeaveGuard(!busy && (method !== null || note.trim() !== ''), 'this closing')
 
   const check = canClose(ledger, month, closings, currentMonth())
 
   const parsedCash = parseTaka(cash)
-  const parsedBal = Object.fromEntries(MEMBERS.map((m) => [m.id, parseTaka(bal[m.id])])) as Record<MemberId, number | null>
+  const parsedBal = Object.fromEntries(members().map((m) => [m.id, parseTaka(bal[m.id])])) as Record<MemberId, number | null>
   const needCash = method === 'manual' || (method === 'settled' && cashMode === 'set')
   const errors: { cash?: string; bal: Partial<Record<MemberId, string>> } = { bal: {} }
   if (needCash && parsedCash === null) errors.cash = 'Enter the counted cash'
-  if (method === 'manual') for (const m of MEMBERS) if (parsedBal[m.id] === null) errors.bal[m.id] = 'Enter an amount (0 if settled)'
+  if (method === 'manual') for (const m of members()) if (parsedBal[m.id] === null) errors.bal[m.id] = 'Enter an amount (0 if settled)'
   const valid = method !== null && !errors.cash && Object.keys(errors.bal).length === 0
 
   const input: ClosingInput | null = valid
@@ -164,7 +166,7 @@ export function CloseMonth({ ledger, month }: { ledger: LedgerId; month: string 
         cashMode: method === 'manual' ? 'set' : method === 'settled' ? cashMode : 'carry',
         openingCash: needCash ? cashSign * parsedCash! : undefined,
         openingBalances:
-          method === 'manual' ? (Object.fromEntries(MEMBERS.map((m) => [m.id, balSign[m.id] * parsedBal[m.id]!])) as MemberMap) : undefined,
+          method === 'manual' ? (Object.fromEntries(members().map((m) => [m.id, balSign[m.id] * parsedBal[m.id]!])) as MemberMap) : undefined,
         note: note.trim() || undefined,
       }
     : null
@@ -320,7 +322,7 @@ export function CloseMonth({ ledger, month }: { ledger: LedgerId; month: string 
       {method === 'manual' && (
         <fieldset className="field">
           <legend className="field-label">Opening balance for each member</legend>
-          {MEMBERS.map((m) => (
+          {members().map((m) => (
             <SignedAmount
               key={m.id}
               id={`bal-${m.id}`}

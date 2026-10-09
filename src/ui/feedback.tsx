@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { pushOverlay } from './backNav'
 import { ConfirmContext, ToastContext, type ConfirmFn, type ConfirmOptions, type Toast, type ToastFn } from './context'
 
 /* ───────────── Confirmation sheet ───────────── */
@@ -25,6 +26,16 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
       d.scrollTop = 0
       d.querySelector<HTMLElement>('#confirm-title')?.focus()
     }
+  }, [state])
+
+  // Android Back closes the open sheet (same as Cancel).
+  useEffect(() => {
+    if (!state) return
+    return pushOverlay(() => {
+      ref.current?.close()
+      state.resolve(false)
+      setState(null)
+    })
   }, [state])
 
   const close = (v: boolean) => {

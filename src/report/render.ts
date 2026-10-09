@@ -4,7 +4,7 @@
  */
 import { formatTaka } from '../domain/money'
 import { dayLabel } from '../domain/month'
-import { categoryName, memberName, UTILITY_CATEGORIES } from '../domain/types'
+import { categoryName, memberName, members, UTILITY_CATEGORIES } from '../domain/types'
 import { balanceLabel, balanceStatus, txCashEffect, txTitle, type Report } from './reportModel'
 
 export const PAGE_W = 1240
@@ -189,7 +189,7 @@ function layout<T extends CanvasLike>(p: Painter<T>, r: Report, opts: ReportOpti
   p.rect(M, p.y, 10, 104, accent, 5)
   p.text(`${r.ledgerName} — ${r.monthLabel}`, M + 34, p.y + 60, { size: 54, weight: 800 })
   const gen = r.generatedAt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
-  p.text(`Mess Ledger · Asif, Dipu, Yusha, Ovi · Prepared ${gen}`, M + 34, p.y + 100, { size: 22, color: C.muted })
+  p.text(`Mess Ledger · ${members().map((m) => m.name).join(', ')} · Prepared ${gen}`, M + 34, p.y + 100, { size: 22, color: C.muted, maxW: CONTENT_W - 34 })
   p.y += 140
 
   // ── Financial summary

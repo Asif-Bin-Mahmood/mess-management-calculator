@@ -136,7 +136,7 @@ const START_INFO: OpeningInfo = {
 /**
  * Splits `total` poisha into four integer shares that sum exactly to `total`.
  * base = floor(total / 4); the 0–3 leftover poisha go one each to members in the fixed
- * order Asif → Dipu → Yusha → Ovi, starting at (monthIndex mod 4) so the extra rotates.
+ * order of MEMBER_IDS (members 1 → 4), starting at (monthIndex mod 4) so the extra rotates.
  */
 export function allocateShares(total: Poisha, month: string): MemberMap {
   if (!Number.isSafeInteger(total)) throw new Error('total must be an integer number of poisha')

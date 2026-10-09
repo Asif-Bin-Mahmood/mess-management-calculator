@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { computeLedgerMonth } from '../domain/ledger'
 import type { LedgerId, MemberId } from '../domain/types'
-import { checkBackup, createBackup, getRestoreUndo, importStatus, restoreBackup, undoLastRestore } from './backup'
+import { BACKUP_SCHEMA_VERSION, checkBackup, createBackup, getRestoreUndo, importStatus, restoreBackup, undoLastRestore } from './backup'
 import { applyClosing, ClosingError, planClosing, planUndoClosing, undoClosing } from './closing'
 import { MessDb } from './db'
 import { applyMutation } from './repo'
@@ -232,7 +232,7 @@ describe('per-ledger backup and restore', () => {
     expect(checkBackup(JSON.stringify(badClosing))).toMatchObject({ ok: false })
     const unknownMember = { ...backup, transactions: [{ ...backup.transactions[0], memberId: 'rahim' }] }
     expect(checkBackup(JSON.stringify(unknownMember))).toMatchObject({ ok: false })
-    const incompatible = { ...backup, schemaVersion: 3 }
+    const incompatible = { ...backup, schemaVersion: BACKUP_SCHEMA_VERSION + 1 }
     expect(checkBackup(JSON.stringify(incompatible))).toMatchObject({ ok: false })
   })
 

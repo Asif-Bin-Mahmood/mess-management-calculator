@@ -1,4 +1,6 @@
+import { App as CapApp } from '@capacitor/app'
 import { Capacitor } from '@capacitor/core'
+import { performBack } from './ui/backNav'
 import { useEffect, type ReactNode } from 'react'
 import { isValidMonth } from './domain/month'
 import type { LedgerId } from './domain/types'
@@ -44,6 +46,18 @@ function Shell() {
       onOfflineReady: () => toast({ message: 'Ready to work offline' }),
     })
   }, [toast])
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return
+    const handle = CapApp.addListener('backButton', () => {
+      void performBack('system').then((handled) => {
+        if (!handled) void CapApp.minimizeApp() // Home: leave the app like any Android app
+      })
+    })
+    return () => {
+      void handle.then((h) => h.remove())
+    }
+  }, [])
 
   const [a, b, c] = route
   let screen: ReactNode

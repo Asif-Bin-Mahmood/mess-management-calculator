@@ -36,5 +36,9 @@ dev-dist
 *.jks
 *.keystore
 keystore.properties
+*.p12
+*.aab
+.env
+.env.*
 # Local tooling
 .claude/

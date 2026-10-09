@@ -24,7 +24,7 @@ export default defineConfig({
         id: './',
         name: 'Mess Ledger — Utilities & Bazar',
         short_name: 'Mess Ledger',
-        description: 'Offline mess accounts for Asif, Dipu, Yusha and Ovi: Utilities and Bazar ledgers with monthly reports.',
+        description: 'Offline accounts for a four-member mess: Utilities and Bazar ledgers with monthly reports.',
         lang: 'en',
         start_url: './',
         scope: './',
