@@ -15,12 +15,14 @@ import { useLive } from '../hooks'
 import { Icon } from '../icons'
 import { useInstallPrompt } from '../pwa'
 import { blockBack, useLeaveGuard } from '../backNav'
+import { useUpdates } from '../../update/context'
 
 export function Settings() {
   const { txs, memberNames } = useApp()
   const toast = useToast()
   const confirm = useConfirm()
   const mutate = useMutate()
+  const updates = useUpdates()
   const fileInput = useRef<HTMLInputElement>(null)
   const lastBackupAt = useLive(lastBackupAtQuery)
   const [persisted, setPersisted] = useState<boolean | null>(null)
@@ -379,6 +381,16 @@ export function Settings() {
             <dt>Version</dt>
             <dd>{__APP_VERSION__}</dd>
           </div>
+          {updates && (
+            <div>
+              <dt>Updates</dt>
+              <dd>
+                <button type="button" className="link-btn" disabled={updates.checking} onClick={updates.checkNow}>
+                  {updates.checking ? 'Checking…' : 'Check for updates'}
+                </button>
+              </dd>
+            </div>
+          )}
         </dl>
         {install && (
           <button type="button" className="btn btn-primary" onClick={install}>

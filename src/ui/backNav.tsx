@@ -142,7 +142,7 @@ export function useLeaveGuard(dirty: boolean, what = 'changes') {
     const guard = () =>
       confirmRef.current({
         title: `Discard ${what}?`,
-        body: <p>Your {what} on this screen have not been saved.</p>,
+        body: <p>{what.charAt(0).toUpperCase() + what.slice(1)} {what.endsWith('changes') ? 'have' : 'has'} not been saved.</p>,
         confirmLabel: 'Discard',
         cancelLabel: 'Keep editing',
         danger: true,
@@ -167,4 +167,9 @@ export function resetBackNav() {
   overlays.length = 0
   blockers = 0
   leaveGuard = null
+}
+
+/** True when no sheet is open and no critical operation runs, so an unsolicited prompt may appear. */
+export function canInterrupt(): boolean {
+  return overlays.length === 0 && blockers === 0
 }

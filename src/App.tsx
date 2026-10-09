@@ -16,6 +16,7 @@ import { CloseMonth } from './ui/screens/MonthClosing'
 import { Reports } from './ui/screens/Reports'
 import { Settings } from './ui/screens/Settings'
 import { TxForm } from './ui/screens/TxForm'
+import { UpdateProvider } from './update/UpdateProvider'
 
 function isLedger(s: string | undefined): s is LedgerId {
   return s === 'utilities' || s === 'bazar'
@@ -25,9 +26,11 @@ export default function App() {
   return (
     <ToastProvider>
       <ConfirmProvider>
-        <AppStateProvider>
-          <Shell />
-        </AppStateProvider>
+        <UpdateProvider>
+          <AppStateProvider>
+            <Shell />
+          </AppStateProvider>
+        </UpdateProvider>
       </ConfirmProvider>
     </ToastProvider>
   )

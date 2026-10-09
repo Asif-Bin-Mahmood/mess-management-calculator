@@ -55,6 +55,15 @@ connection. Reports and backups use the Android share sheet; restore uses the sy
 and allow installation from that source when asked. Newer versions install over older ones and keep
 the data. Uninstalling deletes the app's data, so save a backup first.
 
+**In-app updates:** the app checks the latest stable GitHub Release when it starts or returns to the
+foreground (at most hourly, only when online) and from Backup → Check for updates. It offers an update
+only when the release tag is newer than the installed version and the asset `mess-ledger-vX.Y.Z.apk`
+has a GitHub SHA-256 digest. The APK is downloaded over HTTPS, its checksum, package name, version code
+and signing certificate are verified, and Android's installer then asks the user to confirm. Android
+also asks once to allow installs from Mess Ledger. Nothing is installed silently, and records are kept
+because updates use the same package and signing key. Checks need the repository to be public; while it
+is private they report that updates can't be checked.
+
 **Build locally:** requires JDK 21 (Android Studio's bundled JBR works) and the Android SDK (platform 36).
 
 ```bash
