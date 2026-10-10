@@ -199,7 +199,24 @@ function rowIds(...maps: MemberMap[]): MemberId[] {
   return inRosterOrder(displayRoster(), maps.flatMap((m) => Object.keys(m)))
 }
 
-export function OpeningTable({ before, after, cashBefore, cashAfter, beforeLabel, afterLabel }: { before: MemberMap; after: MemberMap; cashBefore: number; cashAfter: number; beforeLabel: string; afterLabel: string }) {
+export function OpeningTable({
+  before,
+  after,
+  cashBefore,
+  cashAfter,
+  beforeLabel,
+  afterLabel,
+  hideCash,
+}: {
+  before: MemberMap
+  after: MemberMap
+  cashBefore: number
+  cashAfter: number
+  beforeLabel: string
+  afterLabel: string
+  /** Member-paid Bazar has no shared cash (shown only if some is left from the cash method). */
+  hideCash?: boolean
+}) {
   return (
     <table className="impact-table">
       <thead>
@@ -217,11 +234,13 @@ export function OpeningTable({ before, after, cashBefore, cashAfter, beforeLabel
             <td className="num">{formatTaka(after[id] ?? 0)}</td>
           </tr>
         ))}
-        <tr className={cashBefore !== cashAfter ? 'changed' : ''}>
-          <th scope="row">Cash</th>
-          <td className="num">{formatTaka(cashBefore)}</td>
-          <td className="num">{formatTaka(cashAfter)}</td>
-        </tr>
+        {!(hideCash && cashBefore === 0 && cashAfter === 0) && (
+          <tr className={cashBefore !== cashAfter ? 'changed' : ''}>
+            <th scope="row">Cash</th>
+            <td className="num">{formatTaka(cashBefore)}</td>
+            <td className="num">{formatTaka(cashAfter)}</td>
+          </tr>
+        )}
       </tbody>
     </table>
   )

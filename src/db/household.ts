@@ -23,17 +23,24 @@ import {
 } from '../domain/household'
 import { analyzeRosterChange, categoryIsReferenced, firstOpenMonth, memberIsReferenced, memberRemovable, type RosterChangeImpact } from '../domain/ledger'
 import { currentMonth, isValidMonth, monthLabel } from '../domain/month'
+import type { BazarMethod } from '../domain/bazarMethod'
+import { MIN_MONTH } from '../domain/month'
 import { db as defaultDb, type MessDb } from './db'
 import { loadHousehold } from './repo'
 
 export class HouseholdError extends Error {}
 
 async function everything(database: MessDb) {
-  const [transactions, closings, h] = await Promise.all([database.transactions.toArray(), database.closings.toArray(), loadHousehold(database)])
-  return { transactions, closings, ...h }
+  const [transactions, closings, h, methodRow] = await Promise.all([
+    database.transactions.toArray(),
+    database.closings.toArray(),
+    loadHousehold(database),
+    database.meta.get('bazarMethod'),
+  ])
+  return { transactions, closings, ...h, method: (methodRow?.value as BazarMethod | undefined) ?? null }
 }
 
-const tables = (d: MessDb) => [d.members, d.categories, d.transactions, d.closings, d.audit]
+const tables = (d: MessDb) => [d.members, d.categories, d.transactions, d.closings, d.audit, d.meta]
 
 /* ───────────── First-launch setup ───────────── */
 
@@ -61,6 +68,9 @@ export async function setupHousehold(memberNames: readonly string[], categoryNam
       .map((name, i) => ({ id: newId('c'), name, seq: catSeq + i, createdAt: now }))
     await database.members.bulkAdd(members)
     if (categories.length) await database.categories.bulkAdd(categories)
+    // A new household has no Bazar history, so Bazar is recorded with the member-paid method from the start.
+    const bazarRecords = (await database.transactions.where('ledger').equals('bazar').count()) + (await database.closings.where('ledger').equals('bazar').count())
+    if (bazarRecords === 0 && !(await database.meta.get('bazarMethod'))) await database.meta.put({ key: 'bazarMethod', value: { memberPaidFrom: MIN_MONTH } })
     await database.audit.add({ at: now, action: 'household-setup', txId: 'household', note: JSON.stringify({ members: members.map((x) => x.name), categories: categories.map((x) => x.name) }) })
   })
 }
@@ -98,16 +108,16 @@ function nextOf(m: string): string {
 
 /** Pure part of a membership change: impact on both ledgers and whether it is allowed. */
 async function plan(database: MessDb, change: (members: Member[]) => Member[], now: number): Promise<RosterPlan> {
-  const { transactions, closings, members } = await everything(database)
+  const { transactions, closings, members, method } = await everything(database)
   const after = change(members.map((m) => ({ ...m, periods: m.periods.map((p) => ({ ...p })) }))).sort(bySeq)
   for (const m of after) {
     const pp = validatePeriods(m.periods)
     if (pp) throw new HouseholdError(`Invalid membership months: ${pp}.`)
   }
-  const impact = analyzeRosterChange(members, after, transactions, closings, currentMonth(new Date(now)))
+  const impact = analyzeRosterChange(members, after, transactions, closings, currentMonth(new Date(now)), method)
   // Months that have spending but would have nobody sharing it.
   const months = new Set<string>()
-  for (const t of transactions) if (t.deletedAt === undefined && (t.type === 'expense' || t.type === 'expenseRefund')) months.add(t.month)
+  for (const t of transactions) if (t.deletedAt === undefined && (t.type === 'expense' || t.type === 'expenseRefund' || t.type === 'purchase')) months.add(t.month)
   const unsharedMonths = [...months].filter((mo) => !after.some((m) => sharesInPeriods(m.periods, mo))).sort()
   return { before: members, after, impact, unsharedMonths }
 }
@@ -228,16 +238,16 @@ export async function renameMember(id: MemberId, name: string, database: MessDb 
 
 /** True when the member can be removed completely (nothing refers to them and no figure would change, e.g. a setup typo). */
 export async function canDeleteMember(id: MemberId, database: MessDb = defaultDb, now = Date.now()): Promise<boolean> {
-  const { transactions, closings, members } = await everything(database)
-  return memberRemovable(id, members, transactions, closings, currentMonth(new Date(now)))
+  const { transactions, closings, members, method } = await everything(database)
+  return memberRemovable(id, members, transactions, closings, currentMonth(new Date(now)), method)
 }
 
 /** Removes a member that nothing refers to. Members with any history are ended (archived) instead. */
 export async function deleteMember(id: MemberId, database: MessDb = defaultDb, now = Date.now()): Promise<void> {
   await database.transaction('rw', tables(database), async () => {
-    const { transactions, closings, members } = await everything(database)
+    const { transactions, closings, members, method } = await everything(database)
     if (memberIsReferenced(id, transactions, closings)) throw new HouseholdError('This member has entries or closings, so the history is kept. End the membership instead.')
-    if (!memberRemovable(id, members, transactions, closings, currentMonth(new Date(now)))) {
+    if (!memberRemovable(id, members, transactions, closings, currentMonth(new Date(now)), method)) {
       throw new HouseholdError('This member shared expenses already recorded, so removing them would change the other members’ shares. Record that they leave instead.')
     }
     await commit(

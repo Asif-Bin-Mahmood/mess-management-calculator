@@ -16,6 +16,7 @@ import { CloseMonth } from './ui/screens/MonthClosing'
 import { Reports } from './ui/screens/Reports'
 import { Settings } from './ui/screens/Settings'
 import { TxForm } from './ui/screens/TxForm'
+import { BazarMethodScreen } from './ui/screens/BazarMethod'
 import { CategoriesScreen, MembersScreen, Setup } from './ui/screens/Household'
 import { UpdateProvider } from './update/UpdateProvider'
 
@@ -66,10 +67,11 @@ function Shell() {
   const [a, b, c] = route
   let screen: ReactNode
   let tab: string = a ?? ''
-  if (isLedger(a) && b === 'new') screen = <TxForm ledger={a} kind={c === 'contribution' ? 'in' : 'out'} />
+  if (isLedger(a) && b === 'new') screen = <TxForm ledger={a} kind={c === 'contribution' ? 'in' : c === 'purchase' || c === 'settlement' ? c : 'out'} />
   else if (isLedger(a) && b === 'edit' && c) screen = <TxForm ledger={a} editId={c} />
   else if (isLedger(a) && b === 'close' && c && isValidMonth(c)) screen = <CloseMonth ledger={a} month={c} />
   else if (isLedger(a) && b === 'report') screen = <Reports ledger={a} />
+  else if (a === 'bazar' && b === 'method') screen = <BazarMethodScreen />
   else if (isLedger(a)) screen = <Ledger ledger={a} />
   // Old shared reports link: send to the ledger's own report.
   else if (a === 'reports') screen = <Reports ledger={isLedger(b) ? b : 'utilities'} />
@@ -83,7 +85,7 @@ function Shell() {
   // A fresh installation sets up its household first (Backup & settings stays reachable to restore a backup).
   const setup = needsSetup && a !== 'settings'
   if (setup) screen = <Setup />
-  const inForm = setup || b === 'new' || b === 'edit' || b === 'close' || (a === 'settings' && !!b)
+  const inForm = setup || b === 'new' || b === 'edit' || b === 'close' || b === 'method' || (a === 'settings' && !!b)
 
   // Scroll to top on screen change.
   const key = route.join('/')

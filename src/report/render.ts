@@ -195,12 +195,20 @@ function layout<T extends CanvasLike>(p: Painter<T>, r: Report, opts: ReportOpti
   p.y += 140
 
   // ── Financial summary
+  // Member-paid Bazar has no shared cash: its summary is what was bought and each member's equal share.
+  const memberPaid = s.method === 'memberPaid'
   const short = s.remainingCash < 0
-  const tiles: [string, string, string?][] = [
-    ['Total collected', t(s.totalCollected)],
-    ['Total spent', t(s.totalSpent)],
-    [short ? 'Cash short' : 'Cash in hand', t(Math.abs(s.remainingCash)), short ? C.due : undefined],
-  ]
+  const tiles: [string, string, string?][] = memberPaid
+    ? [
+        ['Total Bazar', t(s.totalSpent)],
+        ['Average per person', t(s.averagePerPerson)],
+        ['Members sharing', String(s.sharers.length)],
+      ]
+    : [
+        ['Total collected', t(s.totalCollected)],
+        ['Total spent', t(s.totalSpent)],
+        [short ? 'Cash short' : 'Cash in hand', t(Math.abs(s.remainingCash)), short ? C.due : undefined],
+      ]
   const gap = 20
   const tileW = (CONTENT_W - gap * 2) / 3
   const tileH = 130
@@ -230,26 +238,38 @@ function layout<T extends CanvasLike>(p: Painter<T>, r: Report, opts: ReportOpti
   }
 
   // ── Members
-  const memberCols: Col[] = [
-    { label: 'Member', w: 300, align: 'left' },
-    { label: 'Contributed', w: 340, align: 'right' },
-    { label: 'Due / will receive', w: CONTENT_W - 640, align: 'right' },
-  ]
+  const memberCols: Col[] = memberPaid
+    ? [
+        { label: 'Member', w: 260, align: 'left' },
+        { label: 'Paid', w: 230, align: 'right' },
+        { label: 'Share', w: 230, align: 'right' },
+        { label: 'Due / will receive', w: CONTENT_W - 720, align: 'right' },
+      ]
+    : [
+        { label: 'Member', w: 300, align: 'left' },
+        { label: 'Contributed', w: 340, align: 'right' },
+        { label: 'Due / will receive', w: CONTENT_W - 640, align: 'right' },
+      ]
   section('Members', 52 + Math.min(4, Math.max(1, s.members.length)) * 68 + 40)
   header(memberCols)
   if (s.members.length === 0) p.text('No members this month.', M, p.y + 40, { size: 24, color: C.muted })
   for (const m of s.members) {
     const status = balanceStatus(m.closing)
     const sharingNow = s.sharers.includes(m.memberId)
-    row(memberCols, [
-      { s: sharingNow ? memberName(m.memberId) : `${memberName(m.memberId)} (left)`, weight: 700 },
-      { s: t(m.netContribution) },
-      { s: balanceLabel(m.closing), weight: 700, color: status === 'due' ? C.due : status === 'receivable' ? C.receivable : C.muted },
-    ])
+    const name = { s: sharingNow ? memberName(m.memberId) : `${memberName(m.memberId)} (left)`, weight: 700 }
+    const balance = { s: balanceLabel(m.closing), weight: 700, color: status === 'due' ? C.due : status === 'receivable' ? C.receivable : C.muted }
+    // Settlements move old balances between members; they are shown in "Paid" only through the balance.
+    row(memberCols, memberPaid ? [name, { s: t(m.contributed) }, { s: t(m.share) }, balance] : [name, { s: t(m.netContribution) }, balance])
   }
   p.y += 34
   p.text(
-    s.sharers.length ? `Each sharing member’s share of spending: ${t(s.averagePerPerson)} (${s.sharers.length} sharing)` : 'Nobody shares this month’s spending.',
+    memberPaid
+      ? s.sharers.length
+        ? `Balance = opening + paid − share${s.members.some((m) => m.settled !== 0) ? ' ± settlements' : ''}. Paid above the share: will receive; below: due.`
+        : 'Nobody shares this month’s Bazar.'
+      : s.sharers.length
+        ? `Each sharing member’s share of spending: ${t(s.averagePerPerson)} (${s.sharers.length} sharing)`
+        : 'Nobody shares this month’s spending.',
     M,
     p.y,
     { size: 21, color: C.muted, maxW: CONTENT_W },
@@ -295,14 +315,15 @@ function layout<T extends CanvasLike>(p: Painter<T>, r: Report, opts: ReportOpti
       }
       for (const tx of r.transactions) {
         p.ensure(60)
-        const eff = txCashEffect(tx)
+        // Member-paid entries move no shared cash: show their amount as recorded.
+        const eff = memberPaid ? tx.amount : txCashEffect(tx)
         row(
           txCols,
           [
             { s: dayLabel(tx.date), color: C.muted },
             { s: txTitle(tx), weight: 600 },
             { s: tx.description ?? '', color: C.muted },
-            { s: formatTaka(eff, { decimals: 'always', sign: true }), weight: 700, color: eff < 0 ? C.ink : C.receivable },
+            { s: memberPaid ? t(eff) : formatTaka(eff, { decimals: 'always', sign: true }), weight: 700, color: memberPaid || eff < 0 ? C.ink : C.receivable },
           ],
           60,
         )

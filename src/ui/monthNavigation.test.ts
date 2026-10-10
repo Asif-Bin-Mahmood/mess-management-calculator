@@ -192,7 +192,7 @@ describe('the month picker and the screens that use it', () => {
 
   it('Home, both ledgers and Reports all show the one selected month (historical or future), with empty states', () => {
     for (const month of ['2004-08', '2031-02']) {
-      const app: AppState = { txs, closings: [], members: R4, categories: CATS5, needsSetup: false, month, setMonth: () => {} }
+      const app: AppState = { txs, closings: [], members: R4, categories: CATS5, bazarMethod: null, needsSetup: false, month, setMonth: () => {} }
       const page = (el: ReturnType<typeof h>) => renderToStaticMarkup(h(AppContext.Provider, { value: app }, el))
       const label = monthLabel(month)
       const home = page(h(Home))

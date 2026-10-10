@@ -60,7 +60,11 @@ export const HELP: Record<HelpTopic, HelpEntry> = {
           <li>
             <strong>Due</strong> means the member owes money to the mess. <strong>Will receive</strong> means they paid more than their share.
           </li>
-          <li>Utilities and Bazar are separate: each has its own cash, balances and closings.</li>
+          <li>Utilities and Bazar are separate: each has its own balances and closings.</li>
+          <li>
+            Member-paid Bazar has no shared cash: each <strong>Bazar amount</strong> is what one member paid for shared Bazar. A <strong>settlement</strong> records one
+            member paying another for an old balance and is not Bazar spending.
+          </li>
           <li>Balances carry into the next month. Closing a month can instead start it settled at ৳0 or with verified balances.</li>
         </ul>
         <p className="help-example">Example: ৳1,200 spent by 3 members is ৳400 each. A member who paid ৳500 will receive ৳100.</p>

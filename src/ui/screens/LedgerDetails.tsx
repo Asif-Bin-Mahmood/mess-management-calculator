@@ -38,14 +38,14 @@ function AccountsCheck({ s }: { s: MonthSummary }) {
       <Rows
         rows={[
           ['Member balances total', formatTaka(r.closingBalanceSum)],
-          ['Cash', formatTaka(r.remainingCash)],
+          [s.method === 'memberPaid' ? 'Shared cash (none in member-paid Bazar)' : 'Cash', formatTaka(r.remainingCash)],
           ['Difference', formatTaka(r.difference)],
           ['From closing adjustments', formatTaka(r.explainedDifference)],
           ...(r.correctionDifference !== 0 ? ([['Needs review (correction)', formatTaka(r.correctionDifference), true]] as [string, ReactNode, boolean][]) : []),
           ...(r.unknownDifference !== 0 ? ([['Unknown', formatTaka(r.unknownDifference), true]] as [string, ReactNode, boolean][]) : []),
         ]}
       />
-      {reconciliationLines(r).map((l) => (
+      {reconciliationLines(r, s.method).map((l) => (
         <p key={l.text} className={`sheet-status sheet-status-${l.tone}`}>
           {l.text}
         </p>
@@ -54,7 +54,39 @@ function AccountsCheck({ s }: { s: MonthSummary }) {
   )
 }
 
+/** Member-paid Bazar: what was bought, the equal share, and who is due or will receive. No cash pool. */
+function BazarDetails({ s }: { s: MonthSummary }) {
+  const due = s.members.filter((m) => m.closing < 0)
+  const recv = s.members.filter((m) => m.closing > 0)
+  return (
+    <>
+      <Rows
+        rows={[
+          ['Total Bazar (paid by members)', formatTaka(s.totalSpent)],
+          ['Members sharing', String(s.sharers.length)],
+          ['= Average per person', formatTaka(s.averagePerPerson), true],
+        ]}
+      />
+      <p>Each member’s balance = opening + what they paid − their share. Settlements between members move old balances and are not Bazar spending.</p>
+      {s.remainingCash !== 0 && (
+        <p className="warn">
+          {formatTaka(Math.abs(s.remainingCash))} of {s.remainingCash > 0 ? 'cash' : 'shortfall'} is left from the cash method. Member-paid Bazar keeps no shared
+          cash: settle it in the month before the switch, or undo that month’s closing.
+        </p>
+      )}
+      <h3 className="sheet-h">Due</h3>
+      {due.length === 0 ? <p>No member is due.</p> : <Rows rows={due.map((m) => [memberName(m.memberId), formatTaka(-m.closing)] as [string, ReactNode])} />}
+      <h3 className="sheet-h">Will receive</h3>
+      {recv.length === 0 ? <p>No member will receive.</p> : <Rows rows={recv.map((m) => [memberName(m.memberId), formatTaka(m.closing)] as [string, ReactNode])} />}
+      <h3 className="sheet-h">Opening</h3>
+      <p>{openingSourceText(s)}</p>
+      <AccountsCheck s={s} />
+    </>
+  )
+}
+
 function CashDetails({ s }: { s: MonthSummary }) {
+  if (s.method === 'memberPaid') return <BazarDetails s={s} />
   const due = s.members.filter((m) => m.closing < 0)
   return (
     <>

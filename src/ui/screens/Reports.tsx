@@ -11,9 +11,9 @@ import { useToast } from '../context'
 import { Icon } from '../icons'
 
 export function Reports({ ledger }: { ledger: LedgerId }) {
-  const { txs, closings, month, setMonth, members } = useApp()
+  const { txs, closings, month, setMonth, members, bazarMethod } = useApp()
   const toast = useToast()
-  const report = useMemo(() => buildReport(ledger, members, month, txs ?? [], closings), [ledger, members, month, txs, closings])
+  const report = useMemo(() => buildReport(ledger, members, month, txs ?? [], closings, undefined, bazarMethod), [ledger, members, month, txs, closings, bazarMethod])
   const [withEntries, setWithEntries] = useState(false)
   const [rendered, setRendered] = useState<{ report: typeof report; withEntries: boolean; url: string } | null>(null)
   const preview = rendered?.report === report && rendered.withEntries === withEntries ? rendered.url : null
@@ -65,11 +65,11 @@ export function Reports({ ledger }: { ledger: LedgerId }) {
 
       {s.transactionCount === 0 && (
         <p className="report-empty">
-          No {ledgerName(ledger)} entries in {monthLabel(month)}. The report shows the balances and cash carried into this month.
+          No {ledgerName(ledger)} entries in {monthLabel(month)}. The report shows the balances{s.method === 'memberPaid' ? '' : ' and cash'} carried into this month.
         </p>
       )}
       <p className="report-meta">
-        {s.transactionCount} {s.transactionCount === 1 ? 'entry' : 'entries'} · spent {formatTaka(s.totalSpent)} · {s.reconciliation.balanced ? 'reconciled ✓' : s.reconciliation.status === 'review' ? 'unreconciled after correction — review required' : 'unexplained difference'}{s.closing ? ' · month closed' : ''}
+        {s.transactionCount} {s.transactionCount === 1 ? 'entry' : 'entries'} · {s.method === 'memberPaid' ? 'total Bazar' : 'spent'} {formatTaka(s.totalSpent)} · {s.reconciliation.balanced ? 'reconciled ✓' : s.reconciliation.status === 'review' ? 'unreconciled after correction — review required' : 'unexplained difference'}{s.closing ? ' · month closed' : ''}
       </p>
 
       <div className="export-bar">

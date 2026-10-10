@@ -123,6 +123,13 @@ function SignedAmount({
   )
 }
 
+/** Member-paid Bazar keeps no shared cash, so its closing choices are about balances only. */
+const PAID_METHODS: { id: ClosingMethod; title: string; text: string }[] = [
+  { id: 'carry', title: 'Carry forward', text: 'Balances carry over.' },
+  { id: 'settled', title: 'Start settled at zero', text: 'Settled outside the app or waived. Everyone starts at ৳0.' },
+  { id: 'manual', title: 'Enter verified balances', text: 'Enter each member’s agreed balance.' },
+]
+
 const METHODS: { id: ClosingMethod; title: string; text: string }[] = [
   { id: 'carry', title: 'Carry forward', text: 'Balances and cash carry over.' },
   {
@@ -134,10 +141,12 @@ const METHODS: { id: ClosingMethod; title: string; text: string }[] = [
 ]
 
 export function CloseMonth({ ledger, month }: { ledger: LedgerId; month: string }) {
-  const { txs, closings, setMonth, members } = useApp()
+  const { txs, closings, setMonth, members, bazarMethod } = useApp()
   const confirm = useConfirm()
   const toast = useToast()
-  const source = useMemo(() => computeLedgerMonth(ledger, members, txs ?? [], month, closings), [ledger, members, txs, month, closings])
+  const lm = ledger === 'bazar' ? bazarMethod : null
+  const source = useMemo(() => computeLedgerMonth(ledger, members, txs ?? [], month, closings, lm), [ledger, members, txs, month, closings, lm])
+  const paid = source.method === 'memberPaid'
   // Members shown in the month being closed: each gets an opening balance in the next month.
   const rows = source.members.map((m) => ({ id: m.memberId, name: memberName(m.memberId) }))
   const next = addMonths(month, 1)
@@ -157,7 +166,8 @@ export function CloseMonth({ ledger, month }: { ledger: LedgerId; month: string 
 
   const parsedCash = parseTaka(cash)
   const parsedBal = Object.fromEntries(rows.map((m) => [m.id, parseTaka(bal[m.id] ?? '')])) as Record<MemberId, number | null>
-  const needCash = method === 'manual' || (method === 'settled' && cashMode === 'set')
+  // Member-paid months never enter cash: any cash left from the cash method is kept as it is.
+  const needCash = !paid && (method === 'manual' || (method === 'settled' && cashMode === 'set'))
   const errors: { cash?: string; bal: Partial<Record<MemberId, string>> } = { bal: {} }
   if (needCash && parsedCash === null) errors.cash = 'Enter the counted cash'
   if (method === 'manual') for (const m of rows) if (parsedBal[m.id] === null) errors.bal[m.id] = 'Enter an amount (0 if settled)'
@@ -169,15 +179,15 @@ export function CloseMonth({ ledger, month }: { ledger: LedgerId; month: string 
         sourceMonth: month,
         method: method!,
         settlementKind: method === 'settled' ? kind : undefined,
-        cashMode: method === 'manual' ? 'set' : method === 'settled' ? cashMode : 'carry',
-        openingCash: needCash ? cashSign * parsedCash! : undefined,
+        cashMode: paid ? (method === 'manual' ? 'set' : 'carry') : method === 'manual' ? 'set' : method === 'settled' ? cashMode : 'carry',
+        openingCash: needCash ? cashSign * parsedCash! : paid && method === 'manual' ? source.remainingCash : undefined,
         openingBalances:
           method === 'manual' ? (Object.fromEntries(rows.map((m) => [m.id, (balSign[m.id] ?? 1) * parsedBal[m.id]!])) as MemberMap) : undefined,
         note: note.trim() || undefined,
       }
     : null
 
-  const preview = input && txs ? previewClosing(buildClosing(input, members, txs, closings, 'preview', 0), members, txs, closings) : null
+  const preview = input && txs ? previewClosing(buildClosing(input, members, txs, closings, 'preview', 0, lm), members, txs, closings, lm) : null
 
   if (!txs) return null
   if (source.closing) {
@@ -214,6 +224,7 @@ export function CloseMonth({ ledger, month }: { ledger: LedgerId; month: string 
             cashAfter={o.openingCash}
             beforeLabel={`${monthLabel(month)} closing`}
             afterLabel={`${monthLabel(next)} opening`}
+            hideCash={paid}
           />
         </>
       ),
@@ -254,12 +265,21 @@ export function CloseMonth({ ledger, month }: { ledger: LedgerId; month: string 
           </h2>
         </div>
         <div className="kv">
-          <div>
-            <dt>Closing cash (held by manager)</dt>
-            <dd>
-              <Money value={source.remainingCash} />
-            </dd>
-          </div>
+          {paid ? (
+            <div>
+              <dt>Total Bazar · {formatTaka(source.averagePerPerson)} per person</dt>
+              <dd>
+                <Money value={source.totalSpent} />
+              </dd>
+            </div>
+          ) : (
+            <div>
+              <dt>Closing cash (held by manager)</dt>
+              <dd>
+                <Money value={source.remainingCash} />
+              </dd>
+            </div>
+          )}
         </div>
         <ul className="member-list">
           {source.members.map((m) => (
@@ -274,7 +294,7 @@ export function CloseMonth({ ledger, month }: { ledger: LedgerId; month: string 
       <fieldset className="field">
         <legend className="field-label">How should {monthLabel(next)} start?</legend>
         <div className="method-list">
-          {METHODS.map((m) => (
+          {(paid ? PAID_METHODS : METHODS).map((m) => (
             <label key={m.id} className={`method ${method === m.id ? 'on' : ''}`}>
               <input type="radio" name="method" value={m.id} checked={method === m.id} onChange={() => setMethod(m.id)} />
               <span className="method-title">{m.title}</span>
@@ -298,6 +318,7 @@ export function CloseMonth({ ledger, month }: { ledger: LedgerId; month: string 
             </div>
             <p className="field-hint">Recorded as an adjustment, not as cash.</p>
           </fieldset>
+          {!paid && (
           <fieldset className="field">
             <legend className="field-label">Opening cash for {monthLabel(next)}</legend>
             <div className="choice-grid">
@@ -311,6 +332,7 @@ export function CloseMonth({ ledger, month }: { ledger: LedgerId; month: string 
               </label>
             </div>
           </fieldset>
+          )}
         </>
       )}
 
@@ -371,9 +393,14 @@ export function CloseMonth({ ledger, month }: { ledger: LedgerId; month: string 
             cashAfter={preview.target.openingCash}
             beforeLabel={`${monthLabel(month)} closing`}
             afterLabel={`${monthLabel(next)} opening`}
+            hideCash={paid}
           />
           <p className="card-text">
-            {preview.target.reconciliation.difference === 0
+            {paid
+              ? preview.target.reconciliation.difference === 0
+                ? 'Amounts due will equal amounts to receive.'
+                : `Amounts due and to receive will differ by ${formatTaka(preview.target.reconciliation.difference)}. This adjustment is recorded with this closing, so the report can explain it.`
+              : preview.target.reconciliation.difference === 0
               ? 'Member balances will equal the cash held.'
               : `Member balances will differ from the cash held by ${formatTaka(preview.target.reconciliation.difference)}. This difference is recorded with this closing, so the report can explain it.`}
           </p>

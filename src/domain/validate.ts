@@ -1,8 +1,9 @@
+import { isMemberPaidMonth, type BazarMethod } from './bazarMethod'
 import { sharers, type Category, type CategoryId, type Roster } from './household'
 import { closingAdjustments } from './ledger'
 import { MAX_AMOUNT } from './money'
 import { addMonths, isValidDate, isValidMonth, monthLabel, monthOf } from './month'
-import { CLOSING_METHODS, isMemberTx, TX_TYPES, type ClosingMethod, type LedgerId, type MemberId, type MonthClosing, type Transaction, type TxType } from './types'
+import { CLOSING_METHODS, isMemberPaidType, isMemberTx, TX_TYPES, type ClosingMethod, type LedgerId, type MemberId, type MonthClosing, type Transaction, type TxType } from './types'
 
 /**
  * The household registry a transaction is checked against.
@@ -15,6 +16,8 @@ export interface TxContext {
   categories: readonly Category[]
   entry?: boolean
   keepCategory?: CategoryId
+  /** Bazar method of the installation or backup: decides which entry types each Bazar month accepts. */
+  bazarMethod?: BazarMethod | null
 }
 
 /** The user-editable part of a transaction. */
@@ -24,11 +27,13 @@ export interface TxInput {
   amount: number
   date: string
   memberId?: MemberId
+  /** Settlement only: the member who received the payment. */
+  counterpartyId?: MemberId
   category?: CategoryId
   description?: string
 }
 
-export type TxErrors = Partial<Record<'ledger' | 'type' | 'amount' | 'date' | 'memberId' | 'category' | 'description', string>>
+export type TxErrors = Partial<Record<'ledger' | 'type' | 'amount' | 'date' | 'memberId' | 'counterpartyId' | 'category' | 'description', string>>
 
 export const MAX_DESCRIPTION = 200
 
@@ -40,7 +45,32 @@ export function validateTxInput(tx: TxInput, ctx: TxContext): TxErrors {
   else if (tx.amount > MAX_AMOUNT) e.amount = 'Amount is too large'
   if (typeof tx.date !== 'string' || !isValidDate(tx.date)) e.date = 'Choose a valid date'
 
-  if (TX_TYPES.includes(tx.type)) {
+  // Each month accepts the entry types of its method: member-paid Bazar months take Bazar amounts and
+  // settlements; cash months (all of Utilities, Bazar before the switch) take the cash types.
+  const memberPaid = e.date === undefined && e.ledger === undefined && isMemberPaidMonth(ctx.bazarMethod, tx.ledger, monthOf(tx.date))
+  if (TX_TYPES.includes(tx.type) && e.date === undefined && e.ledger === undefined && memberPaid !== isMemberPaidType(tx.type)) {
+    e.type = memberPaid
+      ? `Bazar uses member-paid entries from ${monthLabel(ctx.bazarMethod!.memberPaidFrom)}: record a Bazar amount or a settlement.`
+      : tx.ledger === 'bazar' && ctx.bazarMethod
+        ? `Bazar before ${monthLabel(ctx.bazarMethod.memberPaidFrom)} uses the cash method (contributions and expenses).`
+        : 'This entry type is not available here.'
+  }
+  if (TX_TYPES.includes(tx.type) && isMemberPaidType(tx.type)) {
+    if (tx.ledger !== 'bazar') e.ledger = 'Only Bazar records member-paid amounts'
+    if (!tx.memberId || !ctx.roster.some((m) => m.id === tx.memberId)) e.memberId = tx.type === 'settlement' ? 'Choose who paid' : 'Choose a member'
+    if (tx.category !== undefined) e.category = 'Bazar amounts have no category'
+    if (tx.type === 'purchase') {
+      if (tx.counterpartyId !== undefined) e.counterpartyId = 'A Bazar amount has no receiver'
+      // Only a member sharing the month can add to its shared Bazar (a former member settles instead).
+      if (ctx.entry && !e.memberId && e.date === undefined && !sharers(ctx.roster, monthOf(tx.date)).some((m) => m.id === tx.memberId)) {
+        e.memberId = `This member does not share ${monthLabel(monthOf(tx.date))}. Record a settlement for an old balance instead.`
+      }
+    } else {
+      if (!tx.counterpartyId || !ctx.roster.some((m) => m.id === tx.counterpartyId)) e.counterpartyId = 'Choose who received the payment'
+      else if (tx.counterpartyId === tx.memberId) e.counterpartyId = 'Choose two different members'
+    }
+  } else if (TX_TYPES.includes(tx.type)) {
+    if (tx.counterpartyId !== undefined) e.counterpartyId = 'Only settlements have a receiver'
     if (isMemberTx(tx.type)) {
       if (!tx.memberId || !ctx.roster.some((m) => m.id === tx.memberId)) e.memberId = 'Choose a member'
       if (tx.category !== undefined) e.category = 'Contributions have no category'
@@ -71,13 +101,13 @@ export function validateTransaction(raw: unknown, ctx: TxContext): string[] {
   const t = raw as Partial<Transaction>
   const problems: string[] = []
   if (typeof t.id !== 'string' || t.id.length === 0 || t.id.length > 64) problems.push('invalid id')
-  const fieldErrors = validateTxInput(t as TxInput, { roster: ctx.roster, categories: ctx.categories })
+  const fieldErrors = validateTxInput(t as TxInput, { roster: ctx.roster, categories: ctx.categories, bazarMethod: ctx.bazarMethod })
   problems.push(...Object.values(fieldErrors))
   if (typeof t.date === 'string' && t.month !== monthOf(t.date)) problems.push('month does not match date')
   if (!Number.isFinite(t.createdAt)) problems.push('invalid createdAt')
   if (!Number.isFinite(t.updatedAt)) problems.push('invalid updatedAt')
   if (t.deletedAt !== undefined && !Number.isFinite(t.deletedAt)) problems.push('invalid deletedAt')
-  const allowed = new Set(['id', 'ledger', 'type', 'amount', 'date', 'month', 'memberId', 'category', 'description', 'createdAt', 'updatedAt', 'deletedAt'])
+  const allowed = new Set(['id', 'ledger', 'type', 'amount', 'date', 'month', 'memberId', 'counterpartyId', 'category', 'description', 'createdAt', 'updatedAt', 'deletedAt'])
   for (const k of Object.keys(t)) if (!allowed.has(k)) problems.push(`unexpected field "${k}"`)
   return problems
 }
@@ -85,8 +115,9 @@ export function validateTransaction(raw: unknown, ctx: TxContext): string[] {
 /** Normalises form input: trims the note and removes fields that do not apply to the type. */
 export function normalizeTxInput(tx: TxInput): TxInput {
   const out: TxInput = { ledger: tx.ledger, type: tx.type, amount: tx.amount, date: tx.date }
-  if (isMemberTx(tx.type)) out.memberId = tx.memberId
+  if (isMemberTx(tx.type) || isMemberPaidType(tx.type)) out.memberId = tx.memberId
   else if (tx.ledger === 'utilities') out.category = tx.category
+  if (tx.type === 'settlement') out.counterpartyId = tx.counterpartyId
   const note = tx.description?.trim()
   if (note) out.description = note
   return out

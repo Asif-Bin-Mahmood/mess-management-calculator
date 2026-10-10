@@ -18,14 +18,17 @@ import { categoryIsReferenced, computeHistory, memberRemovable, type MonthSummar
 import { currentMonth } from '../domain/month'
 import type { LedgerId, MonthClosing, Transaction } from '../domain/types'
 import { validateClosing, validateTransaction } from '../domain/validate'
+import { bazarMethodProblem, type BazarMethod } from '../domain/bazarMethod'
 import { db as defaultDb, MEMBER_NAMES_KEY, type AuditEntry, type MessDb } from './db'
+
+const BAZAR_METHOD_KEY = 'bazarMethod'
 
 export const BACKUP_APP = 'mess-ledger'
 /**
  * v1: whole database, transactions + audit. v2: adds closings, scope and backupId. v3: adds the four member
  * display names. v4: adds the member and Utilities category registries (any household size).
  */
-export const BACKUP_SCHEMA_VERSION = 4
+export const BACKUP_SCHEMA_VERSION = 5
 
 /** 'all' = both ledgers; otherwise a single ledger, which can only be restored into that ledger. */
 export type BackupScope = 'all' | LedgerId
@@ -48,6 +51,11 @@ export interface BackupFile {
    * (schema 1–2): a full restore then keeps the names this device already shows for those members.
    */
   legacyNames?: boolean
+  /**
+   * Bazar method (schema 5; full and Bazar backups). Absent or null = cash method for every month, which is what
+   * every older backup used.
+   */
+  bazarMethod?: BazarMethod | null
 }
 
 export interface BackupSummary {
@@ -75,7 +83,7 @@ function auditLedger(a: AuditEntry): LedgerId | undefined {
 }
 
 export async function createBackup(database: MessDb = defaultDb, now = new Date(), scope: BackupScope = 'all'): Promise<BackupFile> {
-  return database.transaction('r', [database.transactions, database.closings, database.audit, database.members, database.categories], async () => ({
+  return database.transaction('r', [database.transactions, database.closings, database.audit, database.members, database.categories, database.meta], async () => ({
     app: BACKUP_APP,
     schemaVersion: BACKUP_SCHEMA_VERSION,
     backupId: crypto.randomUUID(),
@@ -84,6 +92,7 @@ export async function createBackup(database: MessDb = defaultDb, now = new Date(
     // The whole registry is included even in a single-ledger backup: its entries and closings refer to it.
     members: (await database.members.toArray()).sort(bySeq),
     categories: (await database.categories.toArray()).sort(bySeq),
+    ...(scope === 'utilities' ? {} : { bazarMethod: ((await database.meta.get(BAZAR_METHOD_KEY))?.value as BazarMethod | undefined) ?? null }),
     transactions: (await database.transactions.toArray()).filter((t) => inScope(scope, t.ledger)),
     closings: (await database.closings.toArray()).filter((c) => inScope(scope, c.ledger)),
     audit: (await database.audit.toArray())
@@ -115,6 +124,7 @@ const AUDIT_ACTIONS = new Set([
   'category-add',
   'category-update',
   'category-delete',
+  'bazar-method',
 ])
 
 const fail = (...errors: string[]): BackupCheck => ({ ok: false, errors })
@@ -175,9 +185,18 @@ export function checkBackup(text: string): BackupCheck {
     categories = legacyCategories()
   }
 
+  // Older backups (schema 1–4) always used the cash method for Bazar.
+  let bazarMethod: BazarMethod | null = null
+  if (b.schemaVersion >= 5 && b.bazarMethod !== undefined && b.bazarMethod !== null) {
+    const mp = bazarMethodProblem(b.bazarMethod)
+    if (mp) return fail(`The backup's ${mp}.`)
+    if (scope === 'utilities') return fail('A Utilities backup cannot carry a Bazar method.')
+    bazarMethod = { memberPaidFrom: (b.bazarMethod as BazarMethod).memberPaidFrom }
+  }
+
   const errors: string[] = []
   const ids = new Set<string>()
-  const ctx = { roster: members, categories }
+  const ctx = { roster: members, categories, bazarMethod }
   b.transactions.forEach((t, i) => {
     const problems = validateTransaction(t, ctx)
     if (problems.length) errors.push(`Transaction ${i + 1}: ${problems.join(', ')}`)
@@ -222,7 +241,7 @@ export function checkBackup(text: string): BackupCheck {
     // Every month with spending must have somebody sharing it (the app never creates anything else).
     const unshared = new Set<string>()
     for (const t of b.transactions as Transaction[]) {
-      if (t.deletedAt === undefined && (t.type === 'expense' || t.type === 'expenseRefund') && sharers(members, t.month).length === 0) unshared.add(t.month)
+      if (t.deletedAt === undefined && (t.type === 'expense' || t.type === 'expenseRefund' || t.type === 'purchase') && sharers(members, t.month).length === 0) unshared.add(t.month)
     }
     if (unshared.size) errors.push(`Nobody shares the expenses of ${[...unshared].sort().join(', ')}.`)
   }
@@ -247,6 +266,7 @@ export function checkBackup(text: string): BackupCheck {
       closings,
       audit: (audit as AuditEntry[]).map(({ seq: _seq, ...rest }) => rest),
       ...(b.schemaVersion <= 2 ? { legacyNames: true } : {}),
+      ...(scope === 'utilities' ? {} : { bazarMethod }),
     },
     summary: {
       scope,
@@ -319,11 +339,11 @@ export function singleLedgerRestoreProblem(kind: 'other-ledger' | 'this-ledger',
   return `${why} Members are shared by both ledgers, so a single-ledger backup can only be restored while the members match. Nothing was changed. Restore a full backup (both ledgers) instead.`
 }
 
-function figures(ledger: LedgerId, roster: Roster, txs: readonly Transaction[], closings: readonly MonthClosing[], until: string): string {
+function figures(ledger: LedgerId, roster: Roster, txs: readonly Transaction[], closings: readonly MonthClosing[], until: string, method: BazarMethod | null): string {
   const last = [...txs.filter((t) => t.ledger === ledger).map((t) => t.month), ...closings.filter((c) => c.ledger === ledger).map((c) => c.targetMonth), until].sort().pop()!
   // Amounts only: a member shown with a ৳0 share and ৳0 balance is the same as a member not shown.
   const pick = (s: MonthSummary) => [s.month, s.remainingCash, s.unallocatedSpend, s.members.filter((m) => m.share !== 0 || m.closing !== 0).map((m) => [m.memberId, m.share, m.closing]).sort()]
-  return JSON.stringify(computeHistory(ledger, roster, txs, last, closings).map(pick))
+  return JSON.stringify(computeHistory(ledger, roster, txs, last, closings, ledger === 'bazar' ? method : null).map(pick))
 }
 
 function uniqueName(name: string, taken: string[]): string {
@@ -345,7 +365,7 @@ function uniqueName(name: string, taken: string[]): string {
  */
 export function planRegistry(
   data: BackupFile,
-  local: { members: Member[]; categories: Category[]; transactions: Transaction[]; closings: MonthClosing[] },
+  local: { members: Member[]; categories: Category[]; transactions: Transaction[]; closings: MonthClosing[]; bazarMethod?: BazarMethod | null },
   until: string,
 ): RegistryPlan {
   if (data.scope === 'all') {
@@ -397,13 +417,15 @@ export function planRegistry(
   }
   const scope = data.scope
   const other: LedgerId = scope === 'utilities' ? 'bazar' : 'utilities'
+  const localMethod = local.bazarMethod ?? null
   const otherTx = local.transactions.filter((t) => t.ledger === other)
   const otherCl = local.closings.filter((c) => c.ledger === other)
   let problem: string | null = null
   let problemKind: RegistryPlan['problemKind'] = null
-  if (figures(other, local.members, otherTx, otherCl, until) !== figures(other, members, otherTx, otherCl, until)) {
+  // The other ledger keeps this device's Bazar method; the restored ledger uses the backup's (Bazar backups carry it).
+  if (figures(other, local.members, otherTx, otherCl, until, localMethod) !== figures(other, members, otherTx, otherCl, until, localMethod)) {
     problemKind = 'other-ledger'
-  } else if (figures(scope, data.members, data.transactions, data.closings, until) !== figures(scope, members, data.transactions, data.closings, until)) {
+  } else if (figures(scope, data.members, data.transactions, data.closings, until, data.bazarMethod ?? null) !== figures(scope, members, data.transactions, data.closings, until, data.bazarMethod ?? null)) {
     problemKind = 'this-ledger'
   }
   if (problemKind) problem = singleLedgerRestoreProblem(problemKind, scope)
@@ -411,13 +433,14 @@ export function planRegistry(
 }
 
 async function localState(database: MessDb) {
-  const [members, categories, transactions, closings] = await Promise.all([
+  const [members, categories, transactions, closings, methodRow] = await Promise.all([
     database.members.toArray(),
     database.categories.toArray(),
     database.transactions.toArray(),
     database.closings.toArray(),
+    database.meta.get(BAZAR_METHOD_KEY),
   ])
-  return { members: members.sort(bySeq), categories: categories.sort(bySeq), transactions, closings }
+  return { members: members.sort(bySeq), categories: categories.sort(bySeq), transactions, closings, bazarMethod: (methodRow?.value as BazarMethod | undefined) ?? null }
 }
 
 /** What restoring the backup would do to members and categories (shown before confirming). */
@@ -434,9 +457,12 @@ export async function importStatus(data: BackupFile, database: MessDb = defaultD
   const newer = Number.isFinite(exported)
     ? txs.filter((t) => t.updatedAt > exported).length + closings.filter((c) => c.createdAt > exported || (c.undoneAt ?? 0) > exported).length
     : 0
+  const localMethod = ((await database.meta.get(BAZAR_METHOD_KEY))?.value as BazarMethod | undefined) ?? null
+  const sameMethod = data.scope === 'utilities' || JSON.stringify(localMethod) === JSON.stringify(data.bazarMethod ?? null)
   const sameRegistry =
-    data.scope !== 'all' ||
-    (canonical(await database.members.toArray()) === canonical(data.members) && canonical(await database.categories.toArray()) === canonical(data.categories))
+    sameMethod &&
+    (data.scope !== 'all' ||
+      (canonical(await database.members.toArray()) === canonical(data.members) && canonical(await database.categories.toArray()) === canonical(data.categories)))
   return {
     alreadyImportedAt: prior?.at ?? null,
     identical: sameRegistry && canonical(txs) === canonical(data.transactions) && canonical(closings) === canonical(data.closings),
@@ -457,6 +483,8 @@ interface RestoreUndo {
   /** Single-ledger restores: ids of members/categories the restore added (candidates for removal on undo). */
   addedMemberIds?: string[]
   addedCategoryIds?: string[]
+  /** Bazar method before the restore (present when the restore could change it; null = cash method). */
+  bazarMethodBefore?: BazarMethod | null
   /** Restores made by app 1.1.1 stored the four names here when the restore changed them. */
   memberNames?: Record<string, string>
 }
@@ -526,6 +554,7 @@ export async function restoreBackup(
       categories: local.categories,
       addedMemberIds: reg.members.filter((m) => !local.members.some((x) => x.id === m.id)).map((m) => m.id),
       addedCategoryIds: reg.categories.filter((c) => !local.categories.some((x) => x.id === c.id)).map((c) => c.id),
+      ...(scope === 'utilities' ? {} : { bazarMethodBefore: local.bazarMethod }),
     }
     await database.meta.put({ key: RESTORE_UNDO_KEY, value: undo })
     await database.meta.put({ key: RESTORE_UNDO_INFO_KEY, value: { scope, at: now } })
@@ -543,6 +572,11 @@ export async function restoreBackup(
       }
     }
     await replaceRegistry(database, reg.members, reg.categories)
+    // Full and Bazar restores bring the backup's Bazar method (older backups: the cash method).
+    if (scope !== 'utilities') {
+      if (data.bazarMethod) await database.meta.put({ key: BAZAR_METHOD_KEY, value: data.bazarMethod })
+      else await database.meta.delete(BAZAR_METHOD_KEY)
+    }
 
     let done = 0
     await addInChunks(database.transactions, data.transactions, (n) => {
@@ -595,6 +629,10 @@ export async function undoLastRestore(database: MessDb = defaultDb, now = Date.n
     }
     await addInChunks(database.transactions, u.transactions, () => {})
     await database.closings.bulkAdd(u.closings)
+    if (u.bazarMethodBefore !== undefined) {
+      if (u.bazarMethodBefore) await database.meta.put({ key: BAZAR_METHOD_KEY, value: u.bazarMethodBefore })
+      else await database.meta.delete(BAZAR_METHOD_KEY)
+    }
     if (u.members && u.categories && u.scope === 'all') {
       // Everything returns to the state before the restore (records and household together).
       await replaceRegistry(database, u.members, u.categories)
