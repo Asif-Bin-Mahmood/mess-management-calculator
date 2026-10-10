@@ -22,6 +22,7 @@ const app: AppState = {
   closings: [],
   members: R4,
   categories: CATS5,
+  bazarMethod: null,
   needsSetup: false,
   month: '2026-10',
   setMonth: () => {},

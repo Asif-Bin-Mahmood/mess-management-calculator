@@ -3,7 +3,8 @@ import { ValidationError } from '../../db/repo'
 import { formatTaka, parseTaka, poishaToInput } from '../../domain/money'
 import { currentMonth, dayLabel, isValidDate, lastDayOfMonth, MAX_DATE, MIN_DATE, monthLabel, monthOf, toDateKey } from '../../domain/month'
 import { memberName, sharers, type CategoryId } from '../../domain/household'
-import { ledgerName, txTypeLabel, type LedgerId, type MemberId, type Transaction, type TxType } from '../../domain/types'
+import { isMemberPaidMonth } from '../../domain/bazarMethod'
+import { isMemberPaidType, ledgerName, txTypeLabel, type LedgerId, type MemberId, type Transaction, type TxType } from '../../domain/types'
 import { MAX_DESCRIPTION, type TxErrors, type TxInput } from '../../domain/validate'
 import { checkMemberReturn, computeLedgerMonth, inRosterOrder, type MemberReturnCheck } from '../../domain/ledger'
 import { useApp } from '../context'
@@ -13,6 +14,7 @@ import { useToast, type ConfirmOptions } from '../context'
 import { goBack, navigate } from '../hooks'
 import { useLeaveGuard } from '../backNav'
 import { Icon } from '../icons'
+import { BazarPaidForm, type PaidKind } from './BazarPaidForm'
 
 type Kind = 'in' | 'out'
 
@@ -22,8 +24,8 @@ function defaultDate(month: string): string {
   return month < currentMonth() ? lastDayOfMonth(month) : `${month}-01`
 }
 
-export function TxForm({ ledger, kind: initialKind, editId }: { ledger: LedgerId; kind?: Kind; editId?: string }) {
-  const { txs, month } = useApp()
+export function TxForm({ ledger, kind: initialKind, editId }: { ledger: LedgerId; kind?: Kind | PaidKind; editId?: string }) {
+  const { txs, month, bazarMethod } = useApp()
   if (editId) {
     if (!txs) return null
     const existing = txs.find((t) => t.id === editId)
@@ -35,15 +37,21 @@ export function TxForm({ ledger, kind: initialKind, editId }: { ledger: LedgerId
         </div>
       )
     }
+    if (isMemberPaidType(existing.type)) return <BazarPaidForm key={existing.id} kind={existing.type as PaidKind} existing={existing} month={existing.month} />
     return <FormBody key={existing.id} ledger={ledger} existing={existing} month={existing.month} />
   }
-  return <FormBody key={initialKind} ledger={ledger} initialKind={initialKind ?? 'out'} month={month} />
+  // Member-paid Bazar months have no contributions or expenses: an older link opens "Add Bazar amount" instead.
+  if (ledger === 'bazar' && (initialKind === 'purchase' || initialKind === 'settlement' || isMemberPaidMonth(bazarMethod, 'bazar', month))) {
+    const kind: PaidKind = initialKind === 'settlement' ? 'settlement' : 'purchase'
+    return <BazarPaidForm key={kind} kind={kind} month={month} />
+  }
+  return <FormBody key={initialKind} ledger={ledger} initialKind={initialKind === 'in' ? 'in' : 'out'} month={month} />
 }
 
 function FormBody({ ledger, existing, initialKind, month }: { ledger: LedgerId; existing?: Transaction; initialKind?: Kind; month: string }) {
   const mutate = useMutate()
   const toast = useToast()
-  const { txs, closings, members, categories } = useApp()
+  const { txs, closings, members, categories, bazarMethod } = useApp()
   const amountRef = useRef<HTMLInputElement>(null)
 
   const [kind, setKind] = useState<Kind>(existing ? (existing.type === 'contribution' || existing.type === 'memberRefund' ? 'in' : 'out') : initialKind!)
@@ -75,10 +83,10 @@ function FormBody({ ledger, existing, initialKind, month }: { ledger: LedgerId; 
   const existingMember = existing?.memberId
   const memberChoices = useMemo(() => {
     const sharing = new Set(sharers(members, entryMonth).map((m) => m.id))
-    const shown = computeLedgerMonth(ledger, members, (txs ?? []).filter((t) => t.ledger === ledger), entryMonth, closings).members.map((m) => m.memberId)
+    const shown = computeLedgerMonth(ledger, members, (txs ?? []).filter((t) => t.ledger === ledger), entryMonth, closings, bazarMethod).members.map((m) => m.memberId)
     const ids = inRosterOrder(members, [...sharing, ...shown, ...(existingMember ? [existingMember] : [])])
     return ids.map((id) => ({ id, name: memberName(id), sharing: sharing.has(id) }))
-  }, [members, entryMonth, ledger, txs, closings, existingMember])
+  }, [members, entryMonth, ledger, txs, closings, bazarMethod, existingMember])
   const nobodyShares = sharers(members, entryMonth).length === 0
   const categoryChoices = categories.filter((c) => c.archivedAt === undefined || c.id === existing?.category)
 

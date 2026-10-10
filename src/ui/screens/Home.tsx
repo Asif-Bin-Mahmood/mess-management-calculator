@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { lastBackupAtQuery } from '../queries'
 import { computeLedgerMonth } from '../../domain/ledger'
 import { monthLabel } from '../../domain/month'
+import type { BazarMethod } from '../../domain/bazarMethod'
 import { sharers, type Roster } from '../../domain/household'
 import { LEDGERS, memberName, type LedgerId, type MonthClosing, type Transaction } from '../../domain/types'
 import { balanceStatus, dashboardAlerts } from '../../report/reportModel'
@@ -13,7 +14,7 @@ import { Icon } from '../icons'
 const DAY = 86_400_000
 
 export function Home() {
-  const { txs, closings, month, setMonth, members } = useApp()
+  const { txs, closings, month, setMonth, members, bazarMethod } = useApp()
   const lastBackupAt = useLive(lastBackupAtQuery)
   const [now] = useState(() => Date.now())
   const liveCount = txs?.filter((t) => t.deletedAt === undefined).length ?? 0
@@ -23,7 +24,10 @@ export function Home() {
     <div className="screen">
       <header className="home-head">
         <div>
-          <p className="eyebrow">Mess Ledger</p>
+          <p className="eyebrow brand">
+            <img className="brand-mark" src="./pwa-192.png" alt="" width={24} height={24} />
+            কড়া হিসাব
+          </p>
           <h1 className="home-title">{householdTitle(members, month)}</h1>
         </div>
       </header>
@@ -31,7 +35,7 @@ export function Home() {
 
       <div className="stack">
         {LEDGERS.map((l) => (
-          <LedgerCard key={l.id} ledger={l.id} roster={members} month={month} txs={txs ?? []} closings={closings} />
+          <LedgerCard key={l.id} ledger={l.id} roster={members} month={month} txs={txs ?? []} closings={closings} method={l.id === 'bazar' ? bazarMethod : null} />
         ))}
       </div>
 
@@ -55,8 +59,24 @@ function householdTitle(roster: Roster, month: string): string {
   return names.length <= 4 ? names.join(' · ') : `${names.length} members`
 }
 
-function LedgerCard({ ledger, roster, month, txs, closings }: { ledger: LedgerId; roster: Roster; month: string; txs: Transaction[]; closings: MonthClosing[] }) {
-  const s = useMemo(() => computeLedgerMonth(ledger, roster, txs, month, closings), [ledger, roster, txs, month, closings])
+function LedgerCard({
+  ledger,
+  roster,
+  month,
+  txs,
+  closings,
+  method,
+}: {
+  ledger: LedgerId
+  roster: Roster
+  month: string
+  txs: Transaction[]
+  closings: MonthClosing[]
+  method: BazarMethod | null
+}) {
+  const s = useMemo(() => computeLedgerMonth(ledger, roster, txs, month, closings, method), [ledger, roster, txs, month, closings, method])
+  // Member-paid Bazar has no shared cash: the card shows the month's Bazar total and the equal share.
+  const memberPaid = s.method === 'memberPaid'
   const name = ledger === 'utilities' ? 'Utilities' : 'Bazar'
   const due = s.members.filter((m) => m.closing < 0)
   const recv = s.members.filter((m) => m.closing > 0)
@@ -78,6 +98,27 @@ function LedgerCard({ ledger, roster, month, txs, closings }: { ledger: LedgerId
           <Icon name="right" size={20} className="ledger-card-chevron" />
         </div>
         {s.transactionCount === 0 && <p className="ledger-card-empty">No entries in {monthLabel(month)}{s.openingCash || s.members.some((m) => m.opening) ? ' · figures carried in' : ''}</p>}
+        {memberPaid ? (
+          <>
+            <p className="ledger-card-label">Total Bazar</p>
+            <p className="ledger-card-amount">
+              <Money value={s.totalSpent} />
+            </p>
+            <dl className="ledger-card-stats">
+              <div>
+                <dt>Per person</dt>
+                <dd>
+                  <Money value={s.averagePerPerson} />
+                </dd>
+              </div>
+              <div>
+                <dt>Sharing</dt>
+                <dd>{s.sharers.length}</dd>
+              </div>
+            </dl>
+          </>
+        ) : (
+          <>
         <p className={`ledger-card-label ${s.remainingCash < 0 ? 'neg' : ''}`}>{s.remainingCash < 0 ? 'Cash short' : 'Cash in hand'}</p>
         <p className={`ledger-card-amount ${s.remainingCash < 0 ? 'neg' : ''}`}>
           <Money value={Math.abs(s.remainingCash)} />
@@ -103,6 +144,8 @@ function LedgerCard({ ledger, roster, month, txs, closings }: { ledger: LedgerId
             </dd>
           </div>
         </dl>
+          </>
+        )}
         {dashboardAlerts(s)
           .filter((a) => a.kind !== 'cash-short' && a.tone !== 'info')
           .map((a) => (
@@ -119,6 +162,13 @@ function LedgerCard({ ledger, roster, month, txs, closings }: { ledger: LedgerId
           <span className="ledger-card-status">{statusLine}</span>
         </div>
       </button>
+      {memberPaid ? (
+        <div className="ledger-card-actions">
+          <button type="button" className="btn btn-tonal" onClick={() => navigate('bazar/new/purchase')}>
+            <Icon name="plus" size={18} /> Add Bazar amount
+          </button>
+        </div>
+      ) : (
       <div className="ledger-card-actions">
         <button type="button" className="btn btn-tonal" onClick={() => navigate(`${ledger}/new/contribution`)}>
           <Icon name="arrowIn" size={18} /> Contribution
@@ -127,6 +177,7 @@ function LedgerCard({ ledger, roster, month, txs, closings }: { ledger: LedgerId
           <Icon name="arrowOut" size={18} /> Expense
         </button>
       </div>
+      )}
     </section>
   )
 }

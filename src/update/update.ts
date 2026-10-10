@@ -153,7 +153,7 @@ export function installErrorMessage(code: InstallErrorCode): string {
     case 'CHECKSUM':
       return 'The downloaded file did not match the published checksum, so it was deleted. Try again.'
     case 'PACKAGE':
-      return 'The downloaded file is not a Mess Ledger update, so it was not installed.'
+      return 'The downloaded file is not a কড়া হিসাব update, so it was not installed.'
     case 'SIGNATURE':
       return 'The update is not signed with the same key as this app, so it was not installed.'
     case 'VERSION':

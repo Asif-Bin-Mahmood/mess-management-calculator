@@ -1,6 +1,8 @@
-# Mess Ledger
+# কড়া হিসাব (Kora Hisab)
 
-Mess Ledger is an offline-first accounting app for a shared household or mess of any size. It
+<img src="public/pwa-192.png" alt="কড়া হিসাব logo" width="96" height="96">
+
+কড়া হিসাব (formerly Mess Ledger) is an offline-first accounting app for a shared household or mess of any size. It
 tracks shared spending in two separate ledgers, works out what each member is due to pay or will
 receive, and produces monthly reports, all on the device and without an account or internet connection.
 
@@ -39,7 +41,7 @@ the last backup is more than 14 days old.
    [Releases](https://github.com/Asif-Bin-Mahmood/mess-management-calculator/releases) page and
    download the latest `mess-ledger-vX.Y.Z.apk`.
 2. Open the file and allow installing apps from that source when Android asks.
-3. Open **Mess Ledger**. Android 7.0 or later is required.
+3. Open **কড়া হিসাব**. Android 7.0 or later is required.
 
 New versions install over the existing app and keep its records. From version 1.1.1, the app can check
 GitHub Releases for updates (**Backup → Check for updates**); Android always asks you to confirm an
@@ -102,6 +104,14 @@ cd android && ./gradlew assembleDebug
 Accounting rules and architecture: [docs/SPEC.md](docs/SPEC.md).
 Versioning, signing and publishing releases: [docs/RELEASING.md](docs/RELEASING.md).
 
+## Branding
+
+The app icon, launcher icons, splash screens and PWA icons are generated from the supplied logo,
+`branding/logo-source.webp`, with `npm run icons` (Python 3 with Pillow). The logo is used as supplied: only
+its white margin is made transparent, and it is scaled without cropping. Technical identifiers keep their
+original names (package `com.asifbinmahmood.messledger`, APK `mess-ledger-vX.Y.Z.apk`, database and backup
+format `mess-ledger`), so updates and existing data are unaffected.
+
 ## License
 
-Mess Ledger is released under the [MIT License](LICENSE).
+কড়া হিসাব is released under the [MIT License](LICENSE).

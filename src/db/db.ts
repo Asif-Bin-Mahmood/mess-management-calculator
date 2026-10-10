@@ -1,5 +1,6 @@
 import Dexie, { type EntityTable } from 'dexie'
 import { LEGACY_DEFAULT_NAMES, LEGACY_MEMBER_NAMES, legacyCategories, legacyMembers, type Category, type Member } from '../domain/household'
+import { MIN_MONTH } from '../domain/month'
 import type { LedgerId, MonthClosing, Transaction } from '../domain/types'
 
 export type AuditAction =
@@ -20,6 +21,8 @@ export type AuditAction =
   | 'category-add'
   | 'category-update'
   | 'category-delete'
+  /** Bazar switched to (or back from) the member-paid method. */
+  | 'bazar-method'
 
 export interface AuditEntry {
   seq?: number
@@ -96,6 +99,19 @@ export class MessDb extends Dexie {
         if ((await tx.table('members').count()) === 0) await tx.table('members').bulkAdd(legacyMembers(names, now))
         if ((await tx.table('categories').count()) === 0) await tx.table('categories').bulkAdd(legacyCategories(now))
         await tx.table('meta').delete(MEMBER_NAMES_KEY)
+      })
+    // v5: Bazar member-paid method. An installation with no Bazar records at all records Bazar member-paid from
+    // the start (nothing to convert). One with Bazar history keeps the cash method and is offered a switch from a
+    // month it chooses; its existing Bazar figures never change.
+    this.version(5)
+      .stores({})
+      .upgrade(async (tx) => {
+        const bazarTx = await tx.table('transactions').where('ledger').equals('bazar').count()
+        const bazarClosings = await tx.table('closings').where('ledger').equals('bazar').count()
+        const hasHousehold = (await tx.table('members').count()) > 0
+        if (hasHousehold && bazarTx === 0 && bazarClosings === 0 && !(await tx.table('meta').get('bazarMethod'))) {
+          await tx.table('meta').put({ key: 'bazarMethod', value: { memberPaidFrom: MIN_MONTH } })
+        }
       })
   }
 }

@@ -77,8 +77,8 @@ export function Settings() {
       const file = await makeBackupFile()
       const viaShare = share && canShareFiles(file)
       let result: 'downloaded' | 'shared' | 'cancelled'
-      if (viaShare) result = (await shareFile(file, 'Mess Ledger backup')) ? 'shared' : 'cancelled'
-      else result = await saveFile(file, 'Save Mess Ledger backup')
+      if (viaShare) result = (await shareFile(file, 'কড়া হিসাব backup')) ? 'shared' : 'cancelled'
+      else result = await saveFile(file, 'Save কড়া হিসাব backup')
       if (result === 'cancelled') return
       if (scope === 'all') await setMeta('lastBackupAt', Date.now())
       toast({

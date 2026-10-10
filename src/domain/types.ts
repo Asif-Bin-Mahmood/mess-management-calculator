@@ -4,7 +4,12 @@ export type { CategoryId, MemberId } from './household'
 export { categoryName, memberName } from './household'
 
 export type LedgerId = 'utilities' | 'bazar'
-export type TxType = 'contribution' | 'memberRefund' | 'expense' | 'expenseRefund'
+/**
+ * Cash-method types (Utilities, and Bazar before its member-paid start month): contribution, memberRefund,
+ * expense, expenseRefund. Member-paid Bazar types: purchase (a member paid for shared Bazar) and settlement
+ * (member `memberId` paid member `counterpartyId` to settle balances; never Bazar spending).
+ */
+export type TxType = 'contribution' | 'memberRefund' | 'expense' | 'expenseRefund' | 'purchase' | 'settlement'
 
 /** Amounts are integer poisha (1 taka = 100 poisha). */
 export type Poisha = number
@@ -19,6 +24,8 @@ export interface Transaction {
   /** YYYY-MM, always derived from `date` */
   month: string
   memberId?: MemberId
+  /** Settlement only: the member who received the payment. */
+  counterpartyId?: MemberId
   /** Utilities expense category (stable id from the category registry). */
   category?: CategoryId
   description?: string
@@ -32,7 +39,13 @@ export const LEDGERS: readonly { id: LedgerId; name: string }[] = [
   { id: 'bazar', name: 'Bazar' },
 ]
 
-export const TX_TYPES: readonly TxType[] = ['contribution', 'memberRefund', 'expense', 'expenseRefund']
+export const CASH_TX_TYPES: readonly TxType[] = ['contribution', 'memberRefund', 'expense', 'expenseRefund']
+export const MEMBER_PAID_TX_TYPES: readonly TxType[] = ['purchase', 'settlement']
+export const TX_TYPES: readonly TxType[] = [...CASH_TX_TYPES, ...MEMBER_PAID_TX_TYPES]
+
+export function isMemberPaidType(type: TxType): boolean {
+  return type === 'purchase' || type === 'settlement'
+}
 
 export function ledgerName(id: LedgerId): string {
   return id === 'utilities' ? 'Utilities' : 'Bazar'
@@ -52,6 +65,10 @@ export function txTypeLabel(type: TxType): string {
       return 'Expense'
     case 'expenseRefund':
       return 'Expense refund'
+    case 'purchase':
+      return 'Bazar amount'
+    case 'settlement':
+      return 'Settlement'
   }
 }
 

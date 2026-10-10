@@ -33,6 +33,15 @@ afterEach(async () => {
   await db.delete()
 })
 
+/**
+ * These tests record cash-method Bazar entries, as an installation upgraded from v1.2.0 does. (A brand-new
+ * household starts with member-paid Bazar; those rules are tested in bazarMemberPaid.test.ts.)
+ */
+async function setupCash(names: string[], categories: string[], d: MessDb = db, now = NOW) {
+  await setupHousehold(names, categories, d, now)
+  await d.meta.delete('bazarMethod')
+}
+
 const byName = async (name: string, d = db) => (await loadHousehold(d)).members.find((m) => m.name === name)!
 const bazar = (taka: number, date: string) => applyMutation({ kind: 'create', input: { ledger: 'bazar', type: 'expense', amount: taka * 100, date } }, db, NOW)
 const pay = (memberId: string, taka: number, date: string, ledger: 'bazar' | 'utilities' = 'bazar') =>
@@ -53,7 +62,7 @@ describe('first launch', () => {
     await expect(setupHousehold(['Ana', 'ana'], [], db, NOW)).rejects.toThrow(/already used/)
     await expect(setupHousehold([], [], db, NOW)).rejects.toThrow(/at least one/)
     await expect(setupHousehold(['  ', 'B'], [], db, NOW)).rejects.toThrow(/Enter a name/)
-    await setupHousehold(['  Ana  Rahman ', 'Ben', 'Cy'], ['Water Bill', 'Internet'], db, NOW)
+    await setupCash(['  Ana  Rahman ', 'Ben', 'Cy'], ['Water Bill', 'Internet'], db, NOW)
     const h = await loadHousehold(db)
     expect(h.members.map((m) => [m.name, m.seq, m.periods])).toEqual([
       ['Ana Rahman', 0, [{}]],
@@ -70,7 +79,7 @@ describe('first launch', () => {
   })
 
   it('a single-member household works', async () => {
-    await setupHousehold(['Solo'], [], db, NOW)
+    await setupCash(['Solo'], [], db, NOW)
     await bazar(55.55, '2026-06-02')
     expect((await summary('bazar', '2026-06')).members).toEqual([expect.objectContaining({ share: 5555, closing: -5555 })])
   })
@@ -78,7 +87,7 @@ describe('first launch', () => {
 
 describe('members', () => {
   beforeEach(async () => {
-    await setupHousehold(['Ana', 'Ben'], ['Gas Bill'], db, NOW - 1)
+    await setupCash(['Ana', 'Ben'], ['Gas Bill'], db, NOW - 1)
   })
 
   it('adds a member from a chosen month, with a preview of the change in open months', async () => {
@@ -166,7 +175,7 @@ describe('members', () => {
 
 describe('utilities categories', () => {
   beforeEach(async () => {
-    await setupHousehold(['Ana', 'Ben'], ['Gas Bill', 'Water'], db, NOW - 1)
+    await setupCash(['Ana', 'Ben'], ['Gas Bill', 'Water'], db, NOW - 1)
   })
 
   it('create, rename, archive, restore; archived ones stay on old entries but are not offered for new ones', async () => {
@@ -201,7 +210,7 @@ describe('utilities categories', () => {
 
 describe('backups of a configurable household', () => {
   async function richDevice(d: MessDb) {
-    await setupHousehold(['Ana', 'Ben', 'Cy'], ['Gas Bill', 'Old Bill'], d, NOW - 1)
+    await setupCash(['Ana', 'Ben', 'Cy'], ['Gas Bill', 'Old Bill'], d, NOW - 1)
     const h = await loadHousehold(d)
     const [ana, ben, cy] = h.members
     const [gas, old] = h.categories
@@ -224,7 +233,7 @@ describe('backups of a configurable household', () => {
     expect(check.summary.memberNames).toEqual(['Ana', 'Ben', 'Cy'])
     const other = new MessDb(`household-other-${n}`)
     await other.open()
-    await setupHousehold(['Somebody Else'], [], other, NOW)
+    await setupCash(['Somebody Else'], [], other, NOW)
     await restoreBackup(check.data, other, NOW + 5)
     expect(await loadHousehold(other)).toEqual(await loadHousehold(db))
     for (const ledger of ['utilities', 'bazar'] as const) {
@@ -260,7 +269,7 @@ describe('backups of a configurable household', () => {
     // A device with different members: refused before anything is written.
     const other = new MessDb(`household-diff-${n}`)
     await other.open()
-    await setupHousehold(['Xavier', 'Yan'], [], other, NOW)
+    await setupCash(['Xavier', 'Yan'], [], other, NOW)
     await applyMutation({ kind: 'create', input: { ledger: 'utilities', type: 'expense', amount: 10_00, date: '2026-04-02' } }, other, NOW).catch(() => {})
     const plan = await planRestore(check.data, other, NOW)
     expect(plan.problem).toMatch(/different members|share different months/)
@@ -273,7 +282,7 @@ describe('backups of a configurable household', () => {
 
 describe('audit regressions', () => {
   it('a member who shares months with expenses cannot be removed, even with no own entries (their share would move)', async () => {
-    await setupHousehold(['Ana', 'Ben'], [], db, NOW - 1)
+    await setupCash(['Ana', 'Ben'], [], db, NOW - 1)
     await applyMemberChange({ kind: 'add', name: 'Cy', from: '2026-05' }, db, NOW)
     const cy = await byName('Cy')
     await bazar(300, '2026-05-03') // Cy has a ৳100 share but no entry of their own
@@ -285,7 +294,7 @@ describe('audit regressions', () => {
   })
 
   it('undoing a single-ledger restore keeps members and categories the other ledger now uses', async () => {
-    await setupHousehold(['Ana', 'Ben'], ['Gas'], db, NOW - 1)
+    await setupCash(['Ana', 'Ben'], ['Gas'], db, NOW - 1)
     await bazar(100, '2026-05-03')
     const file = checkBackup(JSON.stringify(await createBackup(db, new Date(NOW), 'bazar')))
     if (!file.ok) throw new Error(file.errors.join())

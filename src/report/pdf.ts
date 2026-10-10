@@ -11,9 +11,13 @@ export interface PdfPage {
 const A4_W = 595.28
 const A4_H = 841.89
 
-function pdfString(s: string): string {
-  const ascii = s.replace(/[—–]/g, '-').replace(/[^\x20-\x7e]/g, '')
-  return '(' + ascii.replace(/[\\()]/g, (c) => '\\' + c) + ')'
+/** A PDF text string: literal for plain ASCII, otherwise UTF-16BE with a byte-order mark (e.g. Bengali). */
+export function pdfString(s: string): string {
+  const text = s.replace(/[—–]/g, '-')
+  if (/^[\x20-\x7e]*$/.test(text)) return '(' + text.replace(/[\\()]/g, (c) => '\\' + c) + ')'
+  let hex = 'FEFF'
+  for (let i = 0; i < text.length; i++) hex += text.charCodeAt(i).toString(16).toUpperCase().padStart(4, '0')
+  return `<${hex}>`
 }
 
 export function buildPdf(pages: PdfPage[], title: string): Uint8Array {
@@ -38,7 +42,7 @@ export function buildPdf(pages: PdfPage[], title: string): Uint8Array {
   const pageObj = (i: number) => 4 + i * 3
   obj(1, '<< /Type /Catalog /Pages 2 0 R >>')
   obj(2, `<< /Type /Pages /Kids [${pages.map((_, i) => `${pageObj(i)} 0 R`).join(' ')}] /Count ${pages.length} >>`)
-  obj(3, `<< /Title ${pdfString(title)} /Producer (Mess Ledger) >>`)
+  obj(3, `<< /Title ${pdfString(title)} /Producer ${pdfString('কড়া হিসাব')} >>`)
 
   pages.forEach((p, i) => {
     const pn = pageObj(i)

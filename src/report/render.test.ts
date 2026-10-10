@@ -149,3 +149,27 @@ describe('concise report after a late correction to a closed month', () => {
     }
   })
 })
+
+describe('member-paid Bazar report', () => {
+  const paidTxs: Transaction[] = [
+    tx('bazar', 'purchase', 900, '2026-11-02', { memberId: 'asif', description: 'PAID-NOTE' }),
+    tx('bazar', 'purchase', 100.01, '2026-11-05', { memberId: 'dipu' }),
+    { ...tx('bazar', 'settlement', 50, '2026-11-06', { memberId: 'ovi' }), counterpartyId: 'asif' },
+  ]
+  const method = { memberPaidFrom: '2026-11' }
+
+  it('shows total Bazar, the average and paid/share per member, with no cash pool', () => {
+    const r = buildReport('bazar', R4, '2026-11', [...data, ...paidTxs], closings, new Date(0), method)
+    expect(r.summary.method).toBe('memberPaid')
+    const text = textOf(layoutReport(r, fakeCanvas, true, { includeTransactions: true }))
+    for (const s of ['Total Bazar', '৳1,000.01', 'Average per person', '৳250.00', 'Members sharing', 'Paid', 'Share', 'Asif · Bazar amount', 'Ovi paid Asif', 'PAID-NOTE'])
+      expect(text).toContain(s)
+    for (const s of ['Total collected', 'Cash in hand', 'Cash short', 'Contributed']) expect(text).not.toContain(s)
+  })
+
+  it('cash-method months before the switch keep the cash report', () => {
+    const text = textOf(layoutReport(buildReport('bazar', R4, '2026-10', [...data, ...paidTxs], closings, new Date(0), method), fakeCanvas, true))
+    expect(text).toContain('Cash in hand')
+    expect(text).not.toContain('Total Bazar')
+  })
+})

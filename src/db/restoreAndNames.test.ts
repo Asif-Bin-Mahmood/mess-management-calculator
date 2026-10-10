@@ -310,10 +310,10 @@ describe('member names', () => {
     }
   })
 
-  it('backups carry the registry (schema 4); older backups keep the names this device shows', async () => {
+  it('backups carry the registry (schema 4+); older backups keep the names this device shows', async () => {
     await saveMemberNames({ asif: 'Rafi', dipu: 'Sami', yusha: 'Tanvir', ovi: 'Nabil' }, db, NOW)
     const own = await createBackup(db, new Date(NOW))
-    expect(own.schemaVersion).toBe(4)
+    expect(own.schemaVersion).toBe(BACKUP_SCHEMA_VERSION) // 4 introduced the registry; 5 adds the Bazar method
     expect(own.members.map((m) => [m.id, m.name])).toEqual([
       ['asif', 'Rafi'],
       ['dipu', 'Sami'],

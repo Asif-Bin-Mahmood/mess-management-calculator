@@ -1,6 +1,7 @@
 import { computeLedgerMonth, openingFromClosing, type MonthOpening, type MonthSummary, type Reconciliation } from '../domain/ledger'
 import { formatTaka } from '../domain/money'
 import { monthLabel } from '../domain/month'
+import type { BazarMethod } from '../domain/bazarMethod'
 import type { Roster } from '../domain/household'
 import { categoryName, isMemberTx, ledgerName, memberName, type LedgerId, type MemberId, type MonthClosing, type Transaction } from '../domain/types'
 
@@ -30,10 +31,11 @@ export function buildReport(
   all: readonly Transaction[],
   closings: readonly MonthClosing[] = [],
   generatedAt = new Date(),
+  method: BazarMethod | null = null,
 ): Report {
   const own = all.filter((t) => t.ledger === ledger)
   const ownClosings = closings.filter((c) => c.ledger === ledger)
-  const summary = computeLedgerMonth(ledger, roster, own, month, ownClosings)
+  const summary = computeLedgerMonth(ledger, roster, own, month, ownClosings, ledger === 'bazar' ? method : null)
   return {
     ledger,
     ledgerName: ledgerName(ledger),
@@ -65,21 +67,25 @@ export function balanceLabel(closing: number): string {
 export function roundingNote(summary: MonthSummary): string {
   // Only members sharing the month have a share (a former member shown for a balance has none).
   const sharing = summary.members.filter((m) => summary.sharers.includes(m.memberId))
-  if (sharing.length === 0) return 'Nobody shares this month’s expenses.'
+  const what = summary.method === 'memberPaid' ? 'Bazar' : 'Expense'
+  if (sharing.length === 0) return summary.method === 'memberPaid' ? 'Nobody shares this month’s Bazar.' : 'Nobody shares this month’s expenses.'
   const min = Math.min(...sharing.map((m) => m.share))
   const extra = sharing.filter((m) => m.share > min).map((m) => memberName(m.memberId))
-  if (extra.length === 0) return `Expense split equally: ${formatTaka(min, { decimals: 'always' })} each.`
-  return `Expense split ${formatTaka(min, { decimals: 'always' })} each; the leftover ${extra.length} poisha went one each to ${extra.join(', ')} (rotating by month) so shares add up exactly.`
+  if (extra.length === 0) return `${what} split equally: ${formatTaka(min, { decimals: 'always' })} each.`
+  return `${what} split ${formatTaka(min, { decimals: 'always' })} each; the leftover ${extra.length} poisha went one each to ${extra.join(', ')} (rotating by month) so shares add up exactly.`
 }
 
 export function txTitle(t: Transaction): string {
+  if (t.type === 'purchase') return `${memberName(t.memberId!)} · Bazar amount`
+  if (t.type === 'settlement') return `${memberName(t.memberId!)} paid ${memberName(t.counterpartyId!)}`
   if (isMemberTx(t.type)) return t.type === 'contribution' ? `${memberName(t.memberId!)} · contribution` : `Returned to ${memberName(t.memberId!)}`
   if (!t.category) return t.type === 'expense' ? 'Bazar expense' : 'Bazar refund'
   return t.type === 'expense' ? categoryName(t.category) : `${categoryName(t.category)} · refund`
 }
 
-/** Signed effect on cash: money in is positive. */
+/** Signed effect on cash: money in is positive. Member-paid entries never touch shared cash (0). */
 export function txCashEffect(t: Transaction): number {
+  if (t.type === 'purchase' || t.type === 'settlement') return 0
   return t.type === 'contribution' || t.type === 'expenseRefund' ? t.amount : -t.amount
 }
 
@@ -100,9 +106,15 @@ export interface ReconciliationLine {
  * Wording for a reconciliation result. A cash difference left by a correction to a closed month is
  * reported separately from a difference with no known cause; neither is ever reported as reconciled.
  */
-export function reconciliationLines(rec: Reconciliation): ReconciliationLine[] {
+export function reconciliationLines(rec: Reconciliation, method: MonthSummary['method'] = 'cash'): ReconciliationLine[] {
   const t = (p: number) => formatTaka(p, { decimals: 'always' })
-  if (rec.status === 'balanced') return [{ tone: 'ok', text: '✓ Balanced — member balances equal the cash held.' }]
+  if (rec.status === 'balanced') {
+    // Member-paid Bazar holds no shared cash: what some members will receive is exactly what the others owe.
+    if (method === 'memberPaid') {
+      return [{ tone: 'ok', text: rec.remainingCash === 0 ? '✓ Balanced — amounts due equal amounts to receive.' : `✓ Balanced — balances equal the ${t(rec.remainingCash)} left from the cash method.` }]
+    }
+    return [{ tone: 'ok', text: '✓ Balanced — member balances equal the cash held.' }]
+  }
   if (rec.status === 'explained') {
     return [{ tone: 'ok', text: `✓ Reconciled — the ${t(rec.difference)} difference comes from recorded closing adjustments, not missing cash.` }]
   }
@@ -119,7 +131,7 @@ export function reconciliationLines(rec: Reconciliation): ReconciliationLine[] {
   return lines
 }
 
-export type AlertKind = 'cash-short' | 'correction-review' | 'correction-info' | 'unknown-difference'
+export type AlertKind = 'cash-short' | 'legacy-cash' | 'correction-review' | 'correction-info' | 'unknown-difference'
 
 export interface DashboardAlert {
   kind: AlertKind
@@ -139,7 +151,17 @@ export function dashboardAlerts(s: MonthSummary): DashboardAlert[] {
   const out: DashboardAlert[] = []
   const rec = s.reconciliation
   const o = s.opening
-  if (s.remainingCash < 0) {
+  if (s.method === 'memberPaid') {
+    // Normally impossible (the switch requires ৳0 cash), but a manual closing before the switch could leave some.
+    if (s.remainingCash !== 0) {
+      out.push({
+        kind: 'legacy-cash',
+        tone: 'review',
+        title: `${formatTaka(Math.abs(s.remainingCash))} ${s.remainingCash > 0 ? 'cash' : 'shortfall'} left from the cash method`,
+        detail: 'Member-paid Bazar has no shared cash',
+      })
+    }
+  } else if (s.remainingCash < 0) {
     out.push({ kind: 'cash-short', tone: 'danger', title: `Cash short by ${formatTaka(-s.remainingCash)}`, detail: 'Spent more than collected' })
   }
   if (rec.correctionDifference !== 0) {

@@ -1,4 +1,5 @@
 import { createContext, useContext, type ReactNode } from 'react'
+import type { BazarMethod } from '../domain/bazarMethod'
 import type { Category, Member } from '../domain/household'
 import type { MonthClosing, Transaction } from '../domain/types'
 
@@ -34,6 +35,8 @@ export interface AppState {
   members: Member[]
   /** Utilities categories (active and archived), in display order. */
   categories: Category[]
+  /** Bazar method: member-paid from `memberPaidFrom`, or null for the cash method in every month. */
+  bazarMethod: BazarMethod | null
   /** True on a fresh installation until the household is set up. */
   needsSetup: boolean
   /** The selected month (shared by Home, both ledgers and Reports); always inside the supported range. */

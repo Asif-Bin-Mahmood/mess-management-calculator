@@ -9,6 +9,7 @@
  * boundary, when a closing decision sets the next month's openings. Those changes are recorded as explicit
  * opening adjustments; reconciliation reports any difference the recorded adjustments do not explain.
  */
+import { isMemberPaidMonth, type BazarMethod } from './bazarMethod'
 import { bySeq, firstDifferentMonth, sharers, type CategoryId, type MemberId, type Roster } from './household'
 import { addMonths, monthIndex, monthLabel, monthRange } from './month'
 import type { LedgerId, MemberMap, MonthClosing, Poisha, Transaction } from './types'
@@ -50,8 +51,12 @@ export interface OpeningInfo {
 export interface MemberSummary {
   memberId: MemberId
   opening: Poisha
+  /** Cash method: cash contributed. Member-paid Bazar: what the member paid for shared Bazar. */
   contributed: Poisha
+  /** Cash method: cash returned to the member. Member-paid Bazar: always 0. */
   returned: Poisha
+  /** Member-paid Bazar: settlements paid to other members minus settlements received (0 for the cash method). */
+  settled: Poisha
   netContribution: Poisha
   share: Poisha
   closing: Poisha
@@ -86,6 +91,8 @@ export interface Reconciliation {
 export interface MonthSummary {
   ledger: LedgerId
   month: string
+  /** How this month is recorded: the cash method, or member-paid Bazar (no shared cash). */
+  method: 'cash' | 'memberPaid'
   openingCash: Poisha
   opening: OpeningInfo
   contributionsGross: Poisha
@@ -252,6 +259,7 @@ export function computeMonth(
       opening: amountOf(opening.balances, id),
       contributed: amountOf(contributed, id),
       returned: amountOf(returned, id),
+      settled: 0,
       netContribution,
       share,
       closing: amountOf(opening.balances, id) + netContribution - share,
@@ -270,6 +278,7 @@ export function computeMonth(
   return {
     ledger,
     month,
+    method: 'cash',
     openingCash: opening.cash,
     opening: info,
     contributionsGross,
@@ -284,6 +293,101 @@ export function computeMonth(
     unallocatedSpend,
     members,
     categoryTotals,
+    reconciliation: {
+      openingBalanceSum,
+      closingBalanceSum,
+      remainingCash,
+      difference,
+      explainedDifference: explainedBefore,
+      unexplained,
+      correctionDifference: correctionBefore,
+      unknownDifference,
+      status,
+      balanced: status === 'balanced' || status === 'explained',
+    },
+    transactionCount: txs.length,
+    closing,
+  }
+}
+
+/**
+ * One member-paid Bazar month. Each `purchase` is money a member personally paid for shared Bazar; the month's
+ * total is split equally among the members sharing the month (same deterministic poisha rotation as the cash
+ * method), and each member's balance changes by (paid − share). A `settlement` moves balance between two members
+ * (payer +amount, receiver −amount) and is not spending. There is no shared cash: cash stays at its opening
+ * value (normally ৳0 — anything else is cash left over from the cash method and is flagged on the dashboard).
+ */
+export function computeMemberPaidMonth(
+  roster: Roster,
+  month: string,
+  opening: MonthOpening,
+  transactions: readonly Transaction[],
+  info: OpeningInfo = START_INFO,
+  explainedBefore = 0,
+  closing: MonthClosing | null = null,
+  correctionBefore = 0,
+): MonthSummary {
+  const txs = transactions.filter((t) => t.ledger === 'bazar' && t.month === month && t.deletedAt === undefined)
+  const paid = zeroMembers()
+  const settled = zeroMembers()
+  let totalSpent = 0
+  for (const t of txs) {
+    if (t.type === 'purchase' && t.memberId) {
+      paid[t.memberId] = amountOf(paid, t.memberId) + t.amount
+      totalSpent += t.amount
+    } else if (t.type === 'settlement' && t.memberId && t.counterpartyId) {
+      settled[t.memberId] = amountOf(settled, t.memberId) + t.amount
+      settled[t.counterpartyId] = amountOf(settled, t.counterpartyId) - t.amount
+    }
+  }
+  const sharing = sharers(roster, month).map((m) => m.id)
+  const shares = allocateShares(totalSpent, month, sharing)
+  const unallocatedSpend = sharing.length === 0 ? totalSpent : 0
+  const rowIds = inRosterOrder(roster, [
+    ...sharing,
+    ...[...keysOf(opening.balances)].filter((id) => opening.balances[id] !== 0),
+    ...keysOf(paid, settled),
+  ])
+  const members: MemberSummary[] = rowIds.map((id) => {
+    const netContribution = amountOf(paid, id) + amountOf(settled, id)
+    const share = amountOf(shares, id)
+    return {
+      memberId: id,
+      opening: amountOf(opening.balances, id),
+      contributed: amountOf(paid, id),
+      returned: 0,
+      settled: amountOf(settled, id),
+      netContribution,
+      share,
+      closing: amountOf(opening.balances, id) + netContribution - share,
+    }
+  })
+  const remainingCash = opening.cash
+  const closingBalanceSum = sum(members.map((m) => m.closing))
+  const openingBalanceSum = sum(Object.values(opening.balances))
+  const difference = closingBalanceSum - remainingCash
+  const unexplained = difference - explainedBefore
+  const unknownDifference = unexplained - correctionBefore
+  const status: Reconciliation['status'] =
+    unknownDifference !== 0 ? 'unknown' : correctionBefore !== 0 ? 'review' : difference !== 0 ? 'explained' : 'balanced'
+  return {
+    ledger: 'bazar',
+    month,
+    method: 'memberPaid',
+    openingCash: opening.cash,
+    opening: info,
+    contributionsGross: 0,
+    memberRefunds: 0,
+    totalCollected: 0,
+    expensesGross: totalSpent,
+    expenseRefunds: 0,
+    totalSpent,
+    remainingCash,
+    averagePerPerson: sharing.length ? roundHalfAwayFromZero(totalSpent / sharing.length) : 0,
+    sharers: sharing,
+    unallocatedSpend,
+    members,
+    categoryTotals: null,
     reconciliation: {
       openingBalanceSum,
       closingBalanceSum,
@@ -420,7 +524,13 @@ export function computeHistory(
   transactions: readonly Transaction[],
   untilMonth: string,
   closings: readonly MonthClosing[] = [],
+  method: BazarMethod | null = null,
 ): MonthSummary[] {
+  // Each month uses its own method: member-paid for Bazar from method.memberPaidFrom on, otherwise cash.
+  const monthOf = (m: string, opening: MonthOpening, txs: readonly Transaction[], info: OpeningInfo, explained: number, closing: MonthClosing | null, corrected: number) =>
+    isMemberPaidMonth(method, ledger, m)
+      ? computeMemberPaidMonth(roster, m, opening, txs, info, explained, closing, corrected)
+      : computeMonth(ledger, roster, m, opening, txs, info, explained, closing, corrected)
   const byMonth = new Map<string, Transaction[]>()
   for (const t of transactions) {
     if (t.ledger !== ledger || t.deletedAt !== undefined) continue
@@ -432,7 +542,7 @@ export function computeHistory(
   let start = firstMonth(ledger, transactions)
   for (const m of active.keys()) if (start === null || m < start) start = m
   if (start === null || start > untilMonth) {
-    return [computeMonth(ledger, roster, untilMonth, EMPTY_OPENING, [], START_INFO, 0, active.get(untilMonth) ?? null)]
+    return [monthOf(untilMonth, EMPTY_OPENING, [], START_INFO, 0, active.get(untilMonth) ?? null, 0)]
   }
 
   const out: MonthSummary[] = []
@@ -444,7 +554,7 @@ export function computeHistory(
     explained += sum(Object.values(info.memberAdjustments)) - info.cashAdjustment
     corrected += info.unappliedCashCorrection
     const closing = active.get(m) ?? null
-    const summary = computeMonth(ledger, roster, m, opening, byMonth.get(m) ?? [], info, explained, closing, corrected)
+    const summary = monthOf(m, opening, byMonth.get(m) ?? [], info, explained, closing, corrected)
     out.push(summary)
     ;({ opening, info } = openingFromClosing(summary, closing))
   }
@@ -457,8 +567,9 @@ export function computeLedgerMonth(
   transactions: readonly Transaction[],
   month: string,
   closings: readonly MonthClosing[] = [],
+  method: BazarMethod | null = null,
 ): MonthSummary {
-  const history = computeHistory(ledger, roster, transactions, month, closings)
+  const history = computeHistory(ledger, roster, transactions, month, closings, method)
   return history[history.length - 1]
 }
 
@@ -501,6 +612,8 @@ export interface CorrectionImpact {
   closingEffects: ClosingEffectChange[]
   /** Closed months from changedMonth on (whether or not their adjustments change). */
   closedMonths: string[]
+  /** True when every affected month is member-paid Bazar (no shared cash). */
+  memberPaid: boolean
 }
 
 function latest(...ms: (string | null)[]): string {
@@ -520,13 +633,14 @@ export function analyzeCorrection(
   changedMonth: string,
   horizon: string,
   closings: readonly MonthClosing[] = [],
+  method: BazarMethod | null = null,
 ): CorrectionImpact | null {
   const active = activeClosings(ledger, closings)
   const lastClosingTarget = [...active.values()].map((c) => c.targetMonth).sort().pop() ?? null
   const end = latest(horizon, lastMonth(ledger, before), lastMonth(ledger, after), lastClosingTarget)
   if (changedMonth >= end) return null
-  const hb = computeHistory(ledger, roster, before, end, closings)
-  const ha = computeHistory(ledger, roster, after, end, closings)
+  const hb = computeHistory(ledger, roster, before, end, closings, method)
+  const ha = computeHistory(ledger, roster, after, end, closings, method)
   const b = hb[hb.length - 1]
   const a = ha[ha.length - 1]
   const byMonthA = new Map(ha.map((s) => [s.month, s]))
@@ -568,6 +682,7 @@ export function analyzeCorrection(
     members: memberChanges(roster, b, a),
     closingEffects,
     closedMonths,
+    memberPaid: isMemberPaidMonth(method, ledger, changedMonth),
   }
 }
 
@@ -624,8 +739,9 @@ export function buildClosing(
   closings: readonly MonthClosing[],
   id: string,
   now: number,
+  method: BazarMethod | null = null,
 ): MonthClosing {
-  const source = computeLedgerMonth(input.ledger, roster, transactions, input.sourceMonth, closings)
+  const source = computeLedgerMonth(input.ledger, roster, transactions, input.sourceMonth, closings, method)
   const balances = zeroMembers()
   for (const m of source.members) balances[m.memberId] = m.closing
   const sourceTxs = transactions.filter((t) => t.ledger === input.ledger && t.month === input.sourceMonth)
@@ -669,10 +785,11 @@ export function previewClosing(
   roster: Roster,
   transactions: readonly Transaction[],
   closings: readonly MonthClosing[],
+  method: BazarMethod | null = null,
 ): ClosingPreview {
   const all = [...closings, closing]
-  const source = computeLedgerMonth(closing.ledger, roster, transactions, closing.sourceMonth, all)
-  const target = computeLedgerMonth(closing.ledger, roster, transactions, closing.targetMonth, all)
+  const source = computeLedgerMonth(closing.ledger, roster, transactions, closing.sourceMonth, all, method)
+  const target = computeLedgerMonth(closing.ledger, roster, transactions, closing.targetMonth, all, method)
   const laterTransactionCount = transactions.filter(
     (t) => t.ledger === closing.ledger && t.deletedAt === undefined && t.month >= closing.targetMonth,
   ).length
@@ -701,6 +818,7 @@ export function analyzeUndo(
   transactions: readonly Transaction[],
   closings: readonly MonthClosing[],
   horizon: string,
+  method: BazarMethod | null = null,
 ): UndoAnalysis {
   const ledger = closing.ledger
   const blockedBy = [...activeClosings(ledger, closings).values()]
@@ -708,10 +826,10 @@ export function analyzeUndo(
     .sort((a, b) => b.sourceMonth.localeCompare(a.sourceMonth))
   const without = closings.map((c) => (c.id === closing.id ? { ...c, undoneAt: c.undoneAt ?? 0 } : c))
   const end = latest(horizon, closing.targetMonth, lastMonth(ledger, transactions))
-  const nowTarget = computeLedgerMonth(ledger, roster, transactions, closing.targetMonth, closings)
-  const afterTarget = computeLedgerMonth(ledger, roster, transactions, closing.targetMonth, without)
-  const nowEnd = computeLedgerMonth(ledger, roster, transactions, end, closings)
-  const afterEnd = computeLedgerMonth(ledger, roster, transactions, end, without)
+  const nowTarget = computeLedgerMonth(ledger, roster, transactions, closing.targetMonth, closings, method)
+  const afterTarget = computeLedgerMonth(ledger, roster, transactions, closing.targetMonth, without, method)
+  const nowEnd = computeLedgerMonth(ledger, roster, transactions, end, closings, method)
+  const afterEnd = computeLedgerMonth(ledger, roster, transactions, end, without, method)
   const openingOf = (s: MonthSummary): MonthOpening => {
     const balances = zeroMembers()
     for (const m of s.members) balances[m.memberId] = m.opening
@@ -878,6 +996,7 @@ export function analyzeRosterChange(
   transactions: readonly Transaction[],
   closings: readonly MonthClosing[],
   horizon: string,
+  method: BazarMethod | null = null,
 ): RosterChangeImpact {
   const ids = new Set([...before.map((m) => m.id), ...after.map((m) => m.id)])
   let first: string | null = null
@@ -892,8 +1011,8 @@ export function analyzeRosterChange(
   const ledgers: RosterLedgerImpact[] = []
   for (const ledger of ['utilities', 'bazar'] as const) {
     const end = latest(horizon, lastMonth(ledger, transactions))
-    const hb = computeHistory(ledger, before, transactions, end, closings)
-    const ha = computeHistory(ledger, after, transactions, end, closings)
+    const hb = computeHistory(ledger, before, transactions, end, closings, method)
+    const ha = computeHistory(ledger, after, transactions, end, closings, method)
     const byA = new Map(ha.map((x) => [x.month, x]))
     const changedMonths = hb
       .filter((x) => {
@@ -923,18 +1042,19 @@ export function memberBalances(
   transactions: readonly Transaction[],
   closings: readonly MonthClosing[],
   month: string,
+  method: BazarMethod | null = null,
 ): Record<LedgerId, MemberMap> {
   const out = { utilities: {}, bazar: {} } as Record<LedgerId, MemberMap>
   for (const ledger of ['utilities', 'bazar'] as const) {
     const end = latest(month, lastMonth(ledger, transactions))
-    for (const m of computeLedgerMonth(ledger, roster, transactions, end, closings).members) out[ledger][m.memberId] = m.closing
+    for (const m of computeLedgerMonth(ledger, roster, transactions, end, closings, method).members) out[ledger][m.memberId] = m.closing
   }
   return out
 }
 
 /** True when any transaction (including deleted ones) or closing refers to the member. */
 export function memberIsReferenced(id: MemberId, transactions: readonly Transaction[], closings: readonly MonthClosing[]): boolean {
-  if (transactions.some((t) => t.memberId === id)) return true
+  if (transactions.some((t) => t.memberId === id || t.counterpartyId === id)) return true
   return closings.some(
     (c) =>
       id in c.snapshot.closingBalances ||
@@ -954,9 +1074,10 @@ export function memberRemovable(
   transactions: readonly Transaction[],
   closings: readonly MonthClosing[],
   horizon: string,
+  method: BazarMethod | null = null,
 ): boolean {
   if (memberIsReferenced(id, transactions, closings)) return false
-  const impact = analyzeRosterChange(roster, roster.filter((m) => m.id !== id), transactions, closings, horizon)
+  const impact = analyzeRosterChange(roster, roster.filter((m) => m.id !== id), transactions, closings, horizon, method)
   return impact.blockedBy === null && impact.ledgers.every((l) => l.changedMonths.length === 0)
 }
 

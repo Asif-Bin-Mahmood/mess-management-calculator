@@ -110,7 +110,7 @@ describe('restoring an older single-ledger backup', () => {
 describe('the Backup screen explains the limitation before a file is chosen', () => {
   it('the Restore card has an information button whose sheet explains the single-ledger limitation', () => {
     setHouseholdDisplay(legacyMembers(), legacyCategories())
-    const app: AppState = { txs: [], closings: [], members: R4, categories: CATS5, needsSetup: false, month: '2026-10', setMonth: () => {} }
+    const app: AppState = { txs: [], closings: [], members: R4, categories: CATS5, bazarMethod: null, needsSetup: false, month: '2026-10', setMonth: () => {} }
     const html = renderToStaticMarkup(h(AppContext.Provider, { value: app }, h(Settings)))
     expect(html).toContain('aria-label="Restore information"')
     const help = renderToStaticMarkup(h('div', null, HELP.restore.body))

@@ -255,7 +255,7 @@ function currentStatus(m: Member, now: string): string {
 }
 
 export function MembersScreen() {
-  const { members, txs, closings } = useApp()
+  const { members, txs, closings, bazarMethod } = useApp()
   const confirm = useConfirm()
   const toast = useToast()
   const [panel, setPanel] = useState<Panel>(null)
@@ -263,7 +263,7 @@ export function MembersScreen() {
   const open = firstOpenMonth(closings)
   const current = members.filter((m) => isCurrentMember(m, now))
   const former = members.filter((m) => !isCurrentMember(m, now))
-  const balances = useMemo(() => memberBalances(members, txs ?? [], closings, now), [members, txs, closings, now])
+  const balances = useMemo(() => memberBalances(members, txs ?? [], closings, now, bazarMethod), [members, txs, closings, now, bazarMethod])
 
   const outstanding = (m: Member) =>
     (['utilities', 'bazar'] as LedgerId[])
@@ -416,7 +416,7 @@ export function MembersScreen() {
           <ul className="row-list">
             {former.map((m) => {
               const owe = outstanding(m)
-              const deletable = memberRemovable(m.id, members, txs ?? [], closings, now)
+              const deletable = memberRemovable(m.id, members, txs ?? [], closings, now, bazarMethod)
               return (
                 <li key={m.id} className="row-item">
                   <Avatar id={m.id} />

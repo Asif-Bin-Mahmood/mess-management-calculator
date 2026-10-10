@@ -4,7 +4,7 @@ import { parseMonthInput } from '../domain/month'
 import { initialMonth } from './monthState'
 import { setHouseholdDisplay } from '../domain/household'
 import { AppContext } from './context'
-import { householdQuery } from './queries'
+import { bazarMethodQuery, householdQuery } from './queries'
 import { readLocal, useLive, writeLocal } from './hooks'
 
 const MONTH_KEY = 'mess-ledger:month'
@@ -15,6 +15,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const txs = useLive(allTransactions)
   const closingRows = useLive(allClosings)
   const household = useLive(householdQuery)
+  const methodRow = useLive(bazarMethodQuery)
   // One selected month shared by Home, both ledgers and Reports. Any month of the supported range can be viewed
   // (before the first entry, empty months, future months); viewing never changes data.
   const [month, setMonthState] = useState(() => initialMonth(readLocal(MONTH_KEY)))
@@ -25,7 +26,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     writeLocal(MONTH_KEY, next)
   }, [])
   const closings = useMemo(() => closingRows ?? [], [closingRows])
-  const ready = closingRows === undefined || household === undefined ? undefined : txs
+  const ready = closingRows === undefined || household === undefined || methodRow === undefined ? undefined : txs
+  const bazarMethod = methodRow?.method ?? null
   const { members, categories } = useMemo(() => {
     const h = household ?? { members: [], categories: [] }
     // Display names are read by memberName()/categoryName() during render (reports included); set them first.
@@ -33,8 +35,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     return h
   }, [household])
   const value = useMemo(
-    () => ({ txs: ready, closings, members, categories, needsSetup: household !== undefined && members.length === 0, month, setMonth }),
-    [ready, closings, members, categories, household, month, setMonth],
+    () => ({ txs: ready, closings, members, categories, bazarMethod, needsSetup: household !== undefined && members.length === 0, month, setMonth }),
+    [ready, closings, members, categories, bazarMethod, household, month, setMonth],
   )
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>
 }
