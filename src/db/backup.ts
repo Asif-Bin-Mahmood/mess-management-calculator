@@ -632,7 +632,12 @@ export async function undoLastRestore(database: MessDb = defaultDb, now = Date.n
     if (u.bazarMethodBefore !== undefined) {
       if (u.bazarMethodBefore) await database.meta.put({ key: BAZAR_METHOD_KEY, value: u.bazarMethodBefore })
       else await database.meta.delete(BAZAR_METHOD_KEY)
+    } else if (u.scope !== 'utilities') {
+      // Undo record written before the Bazar method existed (app 1.2.0 or older): the Bazar records it puts back
+      // were made with the cash method, so Bazar returns to the cash method with them.
+      await database.meta.delete(BAZAR_METHOD_KEY)
     }
+    const methodNow = ((await database.meta.get(BAZAR_METHOD_KEY))?.value as BazarMethod | undefined) ?? null
     if (u.members && u.categories && u.scope === 'all') {
       // Everything returns to the state before the restore (records and household together).
       await replaceRegistry(database, u.members, u.categories)
@@ -648,14 +653,14 @@ export async function undoLastRestore(database: MessDb = defaultDb, now = Date.n
       for (const c of u.categories) if (!categories.some((x) => x.id === c.id) && categoryIsReferenced(c.id, txsNow)) categories.push(c)
       const horizon = currentMonth(new Date(now))
       for (const id of u.addedMemberIds ?? []) {
-        if (memberRemovable(id, members, txsNow, closingsNow, horizon)) members = members.filter((m) => m.id !== id)
+        if (memberRemovable(id, members, txsNow, closingsNow, horizon, methodNow)) members = members.filter((m) => m.id !== id)
       }
       for (const id of u.addedCategoryIds ?? []) {
         if (!categoryIsReferenced(id, txsNow)) categories = categories.filter((c) => c.id !== id)
       }
       // Members restored from the snapshot that nothing needs (and that change no figure) are not kept either.
       for (const m of u.members) {
-        if (!(await database.members.get(m.id)) && memberRemovable(m.id, members, txsNow, closingsNow, horizon)) members = members.filter((x) => x.id !== m.id)
+        if (!(await database.members.get(m.id)) && memberRemovable(m.id, members, txsNow, closingsNow, horizon, methodNow)) members = members.filter((x) => x.id !== m.id)
       }
       await replaceRegistry(database, members.sort(bySeq), categories.sort(bySeq))
     } else if (u.memberNames) {

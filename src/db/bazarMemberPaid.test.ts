@@ -331,6 +331,27 @@ describe('backups', () => {
     expect(checkBackup(JSON.stringify({ ...util, bazarMethod: { memberPaidFrom: MIN_MONTH } })).ok).toBe(false)
   })
 
+  it('undoing a restore made by app 1.2.0 brings Bazar back to the cash method with its old records', async () => {
+    // A v1.2.0 phone restored a Bazar backup over cash-method records, then upgraded. With no Bazar records
+    // left at the upgrade it starts member-paid; undoing that old restore must not leave cash entries unread.
+    await setupHousehold(['Ana', 'Ben'], [], db, NOW)
+    const { a } = await ids()
+    expect(await loadBazarMethod(db)).toEqual({ memberPaidFrom: MIN_MONTH })
+    const oldBazar: Transaction[] = [
+      { id: 'o1', ledger: 'bazar', type: 'contribution', amount: 50000, date: '2026-03-02', month: '2026-03', createdAt: 1, updatedAt: 1, memberId: a },
+      { id: 'o2', ledger: 'bazar', type: 'expense', amount: 30000, date: '2026-03-09', month: '2026-03', createdAt: 2, updatedAt: 2 },
+    ]
+    await db.meta.bulkPut([
+      { key: 'lastRestoreUndo', value: { scope: 'bazar', at: 5, backupId: 'old', transactions: oldBazar, closings: [] } },
+      { key: 'lastRestoreUndoInfo', value: { scope: 'bazar', at: 5 } },
+    ])
+    await undoLastRestore(db, NOW)
+    expect(await loadBazarMethod(db)).toBeNull()
+    const march = await summary('bazar', '2026-03')
+    expect(march.method).toBe('cash')
+    expect([march.totalCollected, march.totalSpent, march.remainingCash]).toEqual([50000, 30000, 20000])
+  })
+
   it('a Utilities-only restore keeps this device’s Bazar method', async () => {
     await setupHousehold(['Ana', 'Ben'], ['Power'], db, NOW)
     const { a } = await ids()
