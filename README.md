@@ -1,114 +1,99 @@
 # Mess Ledger
 
-Offline-first accounting app for a shared four-member mess, available as an Android app (APK) and an
-installable web app (PWA). It keeps two independent ledgers — **Utilities** and **Bazar** — with monthly
-closing, carry-forward and shareable reports. All data stays on the device (IndexedDB); there is no
-backend, account, sync or analytics.
+Mess Ledger is an offline-first accounting app for a shared household or mess of four members. It
+tracks shared spending in two separate ledgers, works out what each member is due to pay or will
+receive, and produces monthly reports, all on the device and without an account or internet connection.
 
-Accounting rules and architecture: [docs/SPEC.md](docs/SPEC.md).
+It is available as an Android app (APK) and can also run as an installable web app (PWA).
 
 ## Features
 
-- Two fully independent ledgers: entries, balances, closings, reports and restores never cross over.
-- Exact integer (poisha) arithmetic; equal shares with a rotating, documented remainder.
-- Monthly closing per ledger: carry forward, start settled at zero, or enter verified balances — each undoable.
-- Reports as PDF, PNG or JPEG, saved or shared from the device.
-- Customizable member names (Backup → Members). Renaming never changes any amount or history.
-- JSON backup and restore of both ledgers or one, validated before anything is replaced, with undo.
-- Works fully offline, including in airplane mode.
+- **Two independent ledgers:** Utilities and Bazar each have their own entries, cash, balances,
+  closings and reports. Nothing moves between them.
+- **Customizable members:** set the display names of the four members at any time.
+- **Balances:** each month's spending is shared equally. Every member's balance shows whether they are
+  **Due** to pay or **Will receive** money back.
+- **Monthly closing:** close a month to carry balances forward, start the next month settled at zero, or
+  enter verified balances. Closings can be undone.
+- **Reports:** concise monthly reports per ledger as PDF, PNG or JPEG, saved or shared from the device.
+- **Backup and restore:** JSON backups of both ledgers or a single one. Files are checked before they
+  replace anything, and the last restore can be undone.
+- **Offline:** everything works without an internet connection.
+
+## Privacy and data storage
+
+All records are stored only on the device where the app is installed. There is no server, account,
+synchronization or analytics, and separate installations (for example a phone and a browser) do not
+share data.
+
+Local data is lost if the app is uninstalled, its storage is cleared, or the device is lost or reset.
+Save backups regularly and keep a copy somewhere else, such as cloud storage. The app reminds you when
+the last backup is more than 14 days old.
+
+## Getting started
+
+### Android app (recommended)
+
+1. On the phone, open the
+   [Releases](https://github.com/Asif-Bin-Mahmood/mess-management-calculator/releases) page and
+   download the latest `mess-ledger-vX.Y.Z.apk`.
+2. Open the file and allow installing apps from that source when Android asks.
+3. Open **Mess Ledger**. Android 7.0 or later is required.
+
+New versions install over the existing app and keep its records. From version 1.1.1, the app can check
+GitHub Releases for updates (**Backup → Check for updates**); Android always asks you to confirm an
+installation. Earlier versions must be updated manually once by installing the new APK.
+
+### Web app (alternative)
+
+The same app can be built and served from any static HTTPS host (see [Development](#development)).
+Open it in Chrome, choose **Install app**, and open it once while online so it is available offline.
+The web app keeps its own records, separate from the Android app.
+
+## Member customization
+
+Open **Backup → Members**, enter the four names, and choose **Save names**. Names must be different
+from each other and up to 24 characters long. Renaming changes only how members are displayed in the
+app and in reports; amounts, balances and history stay exactly the same. Member names are included in
+full backups.
+
+## Backup and restore
+
+- **Save a backup:** go to **Backup**, choose **Both ledgers**, **Utilities** or **Bazar**, then
+  **Save backup**.
+- **Restore:** **Backup → Choose backup file**. The app checks the file and shows what it contains;
+  nothing changes until you confirm **Replace data**. A Utilities backup only replaces Utilities data,
+  and a Bazar backup only Bazar data. **Undo last restore** brings back the previous data.
+- **Move between the web app and the Android app:** save a **Both ledgers** backup in one, then restore
+  it in the other.
+
+After a restore, check the balances and recent entries before uninstalling or clearing the previous
+installation. Backups contain private financial records, so store and share them carefully.
 
 ## Development
 
-Requires Node 22+.
+Requires Node.js 22 or later. The Android build also requires JDK 21 and the Android SDK (platform 36).
 
 ```bash
-npm install
-npm run dev          # development server
-npm test             # unit tests
-npm run typecheck    # TypeScript
-npm run lint         # oxlint
-npm run build        # production build + service worker into dist/
-npm run preview      # serve dist/ (offline / PWA testing)
-npm run check        # typecheck + lint + test + build
-npm run icons        # regenerate web and Android icons
-npm run android:sync # web build + copy into the Android project (Capacitor)
+npm install          # install dependencies
+npm run dev          # start the development server
+npm test             # run unit tests
+npm run typecheck    # check TypeScript types
+npm run lint         # run the linter
+npm run build        # production web build in dist/
+npm run check        # typecheck, lint, test and build
 ```
 
-```
-src/domain/   accounting engine (pure, tested)
-src/db/       Dexie database, audited mutations, backup/restore
-src/report/   report model, renderer, PDF writer, export/share
-src/ui/       React screens and components
-android/      Capacitor Android project (bundles dist/ into the APK)
-.github/      CI: checks, APK build, releases
-```
-
-## Android app
-
-The web build is bundled into the APK and served locally, so the app needs no server or internet
-connection. Reports and backups use the Android share sheet; restore uses the system file picker.
-
-- Application ID: `com.asifbinmahmood.messledger` (fixed — updates depend on it).
-- `versionName` is the `package.json` version; `versionCode` = major·10000 + minor·100 + patch.
-
-**Install or update:** download `mess-ledger-vX.Y.Z.apk` from the repository's Releases page, open it,
-and allow installation from that source when asked. Newer versions install over older ones and keep
-the data. Uninstalling deletes the app's data, so save a backup first.
-
-**In-app updates:** the app checks the latest stable GitHub Release when it starts or returns to the
-foreground (at most hourly, only when online) and from Backup → Check for updates. It offers an update
-only when the release tag is newer than the installed version and the asset `mess-ledger-vX.Y.Z.apk`
-has a GitHub SHA-256 digest. The APK is downloaded over HTTPS, its checksum, package name, version code
-and signing certificate are verified, and Android's installer then asks the user to confirm. Android
-also asks once to allow installs from Mess Ledger. Nothing is installed silently, and records are kept
-because updates use the same package and signing key. Checks need the repository to be public; while it
-is private they report that updates can't be checked.
-
-**Build locally:** requires JDK 21 (Android Studio's bundled JBR works) and the Android SDK (platform 36).
+Build a debug Android APK:
 
 ```bash
 npm run android:sync
-```
-
-```bash
 cd android && ./gradlew assembleDebug
 ```
 
-On Windows, if Gradle reports *"Unable to establish loopback connection"*, set
-`JAVA_TOOL_OPTIONS=-Djdk.net.unixdomain.tmpdir=C:/gtmp` (that socket path must not contain spaces).
+Accounting rules and architecture: [docs/SPEC.md](docs/SPEC.md).
+Versioning, signing and publishing releases: [docs/RELEASING.md](docs/RELEASING.md).
 
-### Releases and signing
+## License
 
-`.github/workflows/android.yml` runs the tests, typecheck, lint and build and produces an APK on every
-push. Pushing a tag `vX.Y.Z` that matches `package.json` builds a signed APK, verifies its certificate,
-and attaches it to a GitHub Release. Builds without signing secrets produce only a debug artifact.
-
-The release keystore is never stored in the repository. CI reads it from the Actions secrets
-`ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`.
-Keystores, `keystore.properties` and passwords are gitignored. Keep an offline backup of the key: without
-it, installed apps cannot be updated. Release certificate SHA-256:
-`EE:AE:07:16:75:19:A0:98:48:65:49:1B:8F:66:9D:F8:99:1D:BA:35:65:D5:FC:72:0C:7E:45:53:9E:76:4D:3B`.
-
-## Web app (PWA)
-
-Deploy `dist/` to any static HTTPS host (relative paths, so a sub-path works). Open it once in Chrome on
-Android, then use **Install app**. After the first load it works offline. Under **Backup → This device**,
-request protected storage so the browser does not evict the data. New versions show a *Reload* prompt;
-updating never touches stored records.
-
-The PWA and the APK keep separate storage. To move data, save a backup in one and restore it in the other.
-
-## Using the app
-
-- **Members:** Backup → Members sets the four display names. Names are stored with the data and included
-  in backups.
-- **Backup:** Backup → Save backup (both ledgers, or one). The home screen reminds you after 14 days.
-- **Restore:** Backup → Choose backup file. The file is fully validated and summarized first, and nothing
-  changes until you confirm. Restoring one ledger never touches the other. **Undo last restore** brings
-  back the replaced data.
-- **Monthly closing:** in a ledger, Month closing → Close *month*. A preview shows each member's closing
-  and opening balance before you confirm. Undo the newest closing first if several are closed.
-- **Reports:** each ledger's **Report** button → choose a month → PDF / PNG / JPEG → Save or Share.
-- **Deleted entries** can be recovered from Backup → Recently deleted.
-
-Backups and reports contain private financial data and are excluded by `.gitignore`. Never commit them.
+Mess Ledger is released under the [MIT License](LICENSE).
