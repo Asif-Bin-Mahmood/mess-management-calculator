@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { monthLabel } from '../../domain/month'
 import { formatTaka } from '../../domain/money'
 import { ledgerName, type LedgerId } from '../../domain/types'
 import { canShareFiles, exportReport, isNativeApp, saveFile, shareFile, type ExportFormat } from '../../report/export'
@@ -10,7 +11,7 @@ import { useToast } from '../context'
 import { Icon } from '../icons'
 
 export function Reports({ ledger }: { ledger: LedgerId }) {
-  const { txs, closings, month, setMonth, minMonth, maxMonth, members } = useApp()
+  const { txs, closings, month, setMonth, members } = useApp()
   const toast = useToast()
   const report = useMemo(() => buildReport(ledger, members, month, txs ?? [], closings), [ledger, members, month, txs, closings])
   const [withEntries, setWithEntries] = useState(false)
@@ -60,8 +61,13 @@ export function Reports({ ledger }: { ledger: LedgerId }) {
     <div className="screen">
       <TopBar title={`${ledgerName(ledger)} report`} back={ledger} ledger={ledger} />
       <p className="form-ledger">Contains {ledgerName(ledger)} data only</p>
-      <MonthSwitcher month={month} onChange={setMonth} min={minMonth} max={maxMonth} />
+      <MonthSwitcher month={month} onChange={setMonth} />
 
+      {s.transactionCount === 0 && (
+        <p className="report-empty">
+          No {ledgerName(ledger)} entries in {monthLabel(month)}. The report shows the balances and cash carried into this month.
+        </p>
+      )}
       <p className="report-meta">
         {s.transactionCount} {s.transactionCount === 1 ? 'entry' : 'entries'} · spent {formatTaka(s.totalSpent)} · {s.reconciliation.balanced ? 'reconciled ✓' : s.reconciliation.status === 'review' ? 'unreconciled after correction — review required' : 'unexplained difference'}{s.closing ? ' · month closed' : ''}
       </p>

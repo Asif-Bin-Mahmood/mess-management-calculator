@@ -16,7 +16,7 @@ import { Icon } from '../icons'
 type Filter = 'all' | 'in' | 'out' | `cat:${CategoryId}`
 
 export function Ledger({ ledger }: { ledger: LedgerId }) {
-  const { txs, closings, month, setMonth, minMonth, maxMonth, members, categories } = useApp()
+  const { txs, closings, month, setMonth, members, categories } = useApp()
   const s = useMemo(() => computeLedgerMonth(ledger, members, txs ?? [], month, closings), [ledger, members, txs, month, closings])
   const monthTxs = useMemo(
     () =>
@@ -42,7 +42,7 @@ export function Ledger({ ledger }: { ledger: LedgerId }) {
           </button>
         }
       />
-      <MonthSwitcher month={month} onChange={setMonth} min={minMonth} max={maxMonth} />
+      <MonthSwitcher month={month} onChange={setMonth} />
 
       <section className={`hero hero-${ledger} ${short ? 'hero-short' : ''}`} aria-label="Cash">
         <div className="hero-head">

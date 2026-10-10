@@ -34,10 +34,10 @@ export interface AppState {
   categories: Category[]
   /** True on a fresh installation until the household is set up. */
   needsSetup: boolean
+  /** The selected month (shared by Home, both ledgers and Reports); always inside the supported range. */
   month: string
+  /** Selects a month; invalid or unsupported values are ignored. */
   setMonth: (m: string) => void
-  minMonth: string
-  maxMonth: string
 }
 
 export const ConfirmContext = createContext<ConfirmFn>(async () => false)

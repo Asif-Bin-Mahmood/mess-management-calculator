@@ -1,7 +1,7 @@
 import { useRef, type ReactNode } from 'react'
 import type { ClosingEffectChange, CorrectionImpact } from '../domain/ledger'
 import { formatTaka } from '../domain/money'
-import { addMonths, monthLabel, shortMonthLabel } from '../domain/month'
+import { currentMonth, MAX_MONTH, MIN_MONTH, monthLabel, parseMonthInput, shortMonthLabel, stepMonth } from '../domain/month'
 import { displayRoster, memberName, memberSeq } from '../domain/household'
 import { closingMethodLabel, type LedgerId, type MemberId } from '../domain/types'
 import { inRosterOrder, type MemberMap } from '../domain/ledger'
@@ -14,59 +14,85 @@ export function Money({ value, sign, className }: { value: number; sign?: boolea
   return <span className={`num ${className ?? ''}`}>{formatTaka(value, { sign })}</span>
 }
 
+/**
+ * The shared month selector. Any month of the supported range (MIN_MONTH–MAX_MONTH) can be chosen with the
+ * arrows (across year boundaries) or the native month picker; `min`/`max` narrow it only where an operation
+ * needs that. Choosing a month only changes what is shown.
+ */
 export function MonthSwitcher({
   month,
   onChange,
-  min,
-  max,
+  min = MIN_MONTH,
+  max = MAX_MONTH,
 }: {
   month: string
   onChange: (m: string) => void
-  min: string
-  max: string
+  min?: string
+  max?: string
 }) {
   const input = useRef<HTMLInputElement>(null)
-  const prev = addMonths(month, -1)
-  const next = addMonths(month, 1)
+  const inRange = (m: string | null): m is string => m !== null && m >= min && m <= max
+  const prev = stepMonth(month, -1)
+  const next = stepMonth(month, 1)
+  const today = currentMonth()
   return (
-    <div className="month-switcher" role="group" aria-label="Month">
-      <button type="button" className="icon-btn" onClick={() => onChange(prev)} disabled={prev < min} aria-label={`Previous month, ${monthLabel(prev)}`}>
-        <Icon name="left" />
-      </button>
-      <button
-        type="button"
-        className="month-label"
-        onClick={() => {
-          const el = input.current
-          if (!el) return
-          try {
-            el.showPicker()
-          } catch {
-            el.focus()
-          }
-        }}
-        aria-label={`${monthLabel(month)}. Choose month`}
-      >
-        <Icon name="calendar" size={18} />
-        <span>{monthLabel(month)}</span>
-      </button>
-      <input
-        ref={input}
-        type="month"
-        className="visually-hidden"
-        tabIndex={-1}
-        aria-hidden="true"
-        value={month}
-        min={min}
-        max={max}
-        onChange={(e) => {
-          const v = e.target.value
-          if (/^\d{4}-\d{2}$/.test(v) && v >= min && v <= max) onChange(v)
-        }}
-      />
-      <button type="button" className="icon-btn" onClick={() => onChange(next)} disabled={next > max} aria-label={`Next month, ${monthLabel(next)}`}>
-        <Icon name="right" />
-      </button>
+    <div className="month-nav">
+      <div className="month-switcher" role="group" aria-label="Month">
+        <button
+          type="button"
+          className="icon-btn"
+          onClick={() => inRange(prev) && onChange(prev)}
+          disabled={!inRange(prev)}
+          aria-label={prev ? `Previous month, ${monthLabel(prev)}` : 'Previous month'}
+        >
+          <Icon name="left" />
+        </button>
+        <button
+          type="button"
+          className="month-label"
+          onClick={() => {
+            const el = input.current
+            if (!el) return
+            try {
+              el.showPicker()
+            } catch {
+              el.focus()
+            }
+          }}
+          aria-label={`${monthLabel(month)}. Choose month`}
+        >
+          <Icon name="calendar" size={18} />
+          <span>{monthLabel(month)}</span>
+        </button>
+        <input
+          ref={input}
+          type="month"
+          className="visually-hidden"
+          tabIndex={-1}
+          aria-hidden="true"
+          value={month}
+          min={min}
+          max={max}
+          onChange={(e) => {
+            const v = parseMonthInput(e.target.value)
+            if (inRange(v)) onChange(v)
+          }}
+        />
+        <button
+          type="button"
+          className="icon-btn"
+          onClick={() => inRange(next) && onChange(next)}
+          disabled={!inRange(next)}
+          aria-label={next ? `Next month, ${monthLabel(next)}` : 'Next month'}
+        >
+          <Icon name="right" />
+        </button>
+      </div>
+      {month !== today && inRange(today) && (
+        <button type="button" className="month-today link-btn" onClick={() => onChange(today)}>
+          Back to this month ({monthLabel(today)})
+        </button>
+      )}
     </div>
   )
 }

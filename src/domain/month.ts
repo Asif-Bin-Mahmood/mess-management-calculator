@@ -1,16 +1,42 @@
 /** Month keys are "YYYY-MM"; they sort lexicographically in calendar order. */
 
+/**
+ * The supported calendar range, January 2000 to December 2100. Every entry date, closing month, membership
+ * month and every month that can be viewed must lie inside it; the month pickers use the same bounds, so the
+ * UI never offers a month the accounting rules would reject.
+ */
+export const MIN_YEAR = 2000
+export const MAX_YEAR = 2100
+export const MIN_MONTH = `${MIN_YEAR}-01`
+export const MAX_MONTH = `${MAX_YEAR}-12`
+export const MIN_DATE = `${MIN_MONTH}-01`
+export const MAX_DATE = `${MAX_MONTH}-31`
+
 export function isValidDate(date: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false
+  if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return false
   const [y, m, d] = date.split('-').map(Number)
-  if (y < 2000 || y > 2100 || m < 1 || m > 12 || d < 1) return false
+  if (y < MIN_YEAR || y > MAX_YEAR || m < 1 || m > 12 || d < 1) return false
   return d <= daysInMonth(y, m)
 }
 
 export function isValidMonth(month: string): boolean {
-  if (!/^\d{4}-\d{2}$/.test(month)) return false
+  if (typeof month !== 'string' || !/^\d{4}-\d{2}$/.test(month)) return false
   const [y, m] = month.split('-').map(Number)
-  return y >= 2000 && y <= 2100 && m >= 1 && m <= 12
+  return y >= MIN_YEAR && y <= MAX_YEAR && m >= 1 && m <= 12
+}
+
+/** `n` months from `month`, or null if that leaves the supported range. Handles year boundaries. */
+export function stepMonth(month: string, n: number): string | null {
+  if (!isValidMonth(month)) return null
+  const next = addMonths(month, n)
+  return isValidMonth(next) ? next : null
+}
+
+/** A month typed or picked by the user ("YYYY-MM", surrounding spaces ignored), or null if invalid or unsupported. */
+export function parseMonthInput(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const v = value.trim()
+  return isValidMonth(v) ? v : null
 }
 
 function daysInMonth(y: number, m: number): number {

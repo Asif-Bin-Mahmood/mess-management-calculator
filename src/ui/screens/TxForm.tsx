@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { ValidationError } from '../../db/repo'
 import { formatTaka, parseTaka, poishaToInput } from '../../domain/money'
-import { currentMonth, dayLabel, isValidDate, lastDayOfMonth, monthLabel, monthOf, toDateKey } from '../../domain/month'
+import { currentMonth, dayLabel, isValidDate, lastDayOfMonth, MAX_DATE, MIN_DATE, monthLabel, monthOf, toDateKey } from '../../domain/month'
 import { memberName, sharers, type CategoryId } from '../../domain/household'
 import { ledgerName, txTypeLabel, type LedgerId, type MemberId, type Transaction, type TxType } from '../../domain/types'
 import { MAX_DESCRIPTION, type TxErrors, type TxInput } from '../../domain/validate'
@@ -250,6 +250,8 @@ function FormBody({ ledger, existing, initialKind, month }: { ledger: LedgerId; 
           <input
             type="date"
             className="input"
+            min={MIN_DATE}
+            max={MAX_DATE}
             value={date}
             onChange={(e) => setDate(e.target.value)}
             aria-invalid={!!errors.date}

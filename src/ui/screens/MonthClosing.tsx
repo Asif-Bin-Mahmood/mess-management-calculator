@@ -58,7 +58,11 @@ export function MonthStatusRow({ ledger, s }: { ledger: LedgerId; s: MonthSummar
   return (
     <p className="month-status month-status-muted">
       <Icon name="calendar" size={18} />
-      {st.kind === 'not-yet' ? `${name(s.month)} can be closed from ${availableLabel(st.availableFrom)}` : 'Close later months first (undo newest first)'}
+      {st.kind === 'not-yet'
+        ? `${name(s.month)} can be closed from ${availableLabel(st.availableFrom)}`
+        : st.kind === 'before-start'
+          ? `Nothing to close: ${st.firstMonth ? `this ledger starts in ${monthLabel(st.firstMonth)}` : 'this ledger has no entries yet'}`
+          : 'Close later months first (undo newest first)'}
     </p>
   )
 }

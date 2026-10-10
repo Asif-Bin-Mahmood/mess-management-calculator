@@ -2259,3 +2259,30 @@ body:has(.app-form) .toasts {
 .card-actions .btn {
   flex: 1 1 140px;
 }
+
+.month-nav {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.month-nav > .month-switcher {
+  align-self: stretch;
+}
+
+.month-today {
+  font-size: 14px;
+}
+
+.ledger-card-empty,
+.report-empty {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.report-empty {
+  text-align: center;
+}

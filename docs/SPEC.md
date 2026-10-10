@@ -33,6 +33,11 @@ cross-ledger reconciliation.
 
 Utilities expenses refer to a category from the household's category registry. Bazar has none.
 Amounts are positive integer **poisha**; a transaction's month is derived from its date.
+Supported calendar range: January 2000 – December 2100 (`MIN_MONTH`/`MAX_MONTH` in `src/domain/month.ts`). Entry
+dates, closing months and membership months are validated against it, and the month selector offers exactly
+this range: any month can be viewed (before the first entry, empty, or future) and viewing never changes data.
+One selected month is shared by Home, both ledgers and Reports. Closing is not offered for empty months more than
+one month before a ledger's first entry or closing.
 
 ## Accounting engine (`src/domain/ledger.ts`, pure)
 

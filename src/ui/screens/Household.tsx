@@ -23,7 +23,7 @@ import {
 import { CATEGORY_TEMPLATES, isCurrentMember, MAX_MEMBERS, MAX_NAME, memberName, validateNames, type Category, type Member } from '../../domain/household'
 import { firstOpenMonth, memberBalances, memberIsReferenced } from '../../domain/ledger'
 import { formatTaka } from '../../domain/money'
-import { addMonths, currentMonth, isValidMonth, monthLabel } from '../../domain/month'
+import { addMonths, currentMonth, isValidMonth, MAX_MONTH, MIN_MONTH, monthLabel } from '../../domain/month'
 import { ledgerName, type LedgerId } from '../../domain/types'
 import { useLeaveGuard } from '../backNav'
 import { Avatar, EmptyState, TopBar } from '../common'
@@ -529,7 +529,8 @@ function MemberPanel({
             type="month"
             className="input"
             value={month}
-            min={panel.kind === 'end' ? (open ? addMonths(open, -1) : undefined) : minMonth}
+            min={panel.kind === 'end' ? (open ? addMonths(open, -1) : MIN_MONTH) : (minMonth ?? MIN_MONTH)}
+            max={MAX_MONTH}
             onChange={(e) => setMonth(e.target.value)}
             aria-describedby="panel-month-hint"
           />

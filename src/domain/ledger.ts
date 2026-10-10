@@ -792,6 +792,8 @@ export type MonthClosingStatus =
   | { kind: 'not-yet'; availableFrom: string }
   /** Closing this month is blocked (e.g. a later month is closed). */
   | { kind: 'blocked'; reason: string }
+  /** A past month well before this ledger's first entry or closing: nothing to close there. */
+  | { kind: 'before-start'; firstMonth: string | null }
 
 /**
  * The month the dashboard should offer to close: the previous calendar month, when this ledger has
@@ -818,6 +820,12 @@ export function monthClosingStatus(
 ): MonthClosingStatus {
   const closed = activeClosings(ledger, closings).get(viewedMonth)
   if (closed) return { kind: 'closed', closing: closed }
+  // Browsing can reach any supported month. Closing is offered from the month just before the ledger's first
+  // activity (e.g. to record verified opening balances when starting), not for empty months long before it.
+  let first = firstMonth(ledger, transactions)
+  for (const m of activeClosings(ledger, closings).keys()) if (first === null || m < first) first = m
+  const offerFrom = addMonths(first ?? currentMonth, -1)
+  if (viewedMonth < currentMonth && viewedMonth < offerFrom) return { kind: 'before-start', firstMonth: first }
   const check = canClose(ledger, viewedMonth, closings, currentMonth)
   if (check.ok) return { kind: 'can-close', month: viewedMonth }
   const pending = nextMonthToClose(ledger, transactions, closings, currentMonth)

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { lastBackupAtQuery } from '../queries'
 import { computeLedgerMonth } from '../../domain/ledger'
+import { monthLabel } from '../../domain/month'
 import { sharers, type Roster } from '../../domain/household'
 import { LEDGERS, memberName, type LedgerId, type MonthClosing, type Transaction } from '../../domain/types'
 import { balanceStatus, dashboardAlerts } from '../../report/reportModel'
@@ -12,7 +13,7 @@ import { Icon } from '../icons'
 const DAY = 86_400_000
 
 export function Home() {
-  const { txs, closings, month, setMonth, minMonth, maxMonth, members } = useApp()
+  const { txs, closings, month, setMonth, members } = useApp()
   const lastBackupAt = useLive(lastBackupAtQuery)
   const [now] = useState(() => Date.now())
   const liveCount = txs?.filter((t) => t.deletedAt === undefined).length ?? 0
@@ -26,7 +27,7 @@ export function Home() {
           <h1 className="home-title">{householdTitle(members, month)}</h1>
         </div>
       </header>
-      <MonthSwitcher month={month} onChange={setMonth} min={minMonth} max={maxMonth} />
+      <MonthSwitcher month={month} onChange={setMonth} />
 
       <div className="stack">
         {LEDGERS.map((l) => (
@@ -76,6 +77,7 @@ function LedgerCard({ ledger, roster, month, txs, closings }: { ledger: LedgerId
           </h2>
           <Icon name="right" size={20} className="ledger-card-chevron" />
         </div>
+        {s.transactionCount === 0 && <p className="ledger-card-empty">No entries in {monthLabel(month)}{s.openingCash || s.members.some((m) => m.opening) ? ' · figures carried in' : ''}</p>}
         <p className={`ledger-card-label ${s.remainingCash < 0 ? 'neg' : ''}`}>{s.remainingCash < 0 ? 'Cash short' : 'Cash in hand'}</p>
         <p className={`ledger-card-amount ${s.remainingCash < 0 ? 'neg' : ''}`}>
           <Money value={Math.abs(s.remainingCash)} />

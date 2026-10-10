@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState, type ReactNode } from 'react'
 import { db } from '../db/db'
-import { addMonths, currentMonth, isValidMonth } from '../domain/month'
+import { parseMonthInput } from '../domain/month'
+import { initialMonth } from './monthState'
 import { setHouseholdDisplay } from '../domain/household'
 import { AppContext } from './context'
 import { householdQuery } from './queries'
@@ -14,28 +15,15 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const txs = useLive(allTransactions)
   const closingRows = useLive(allClosings)
   const household = useLive(householdQuery)
-  const [month, setMonthState] = useState(() => {
-    const saved = readLocal(MONTH_KEY)
-    return saved && isValidMonth(saved) ? saved : currentMonth()
-  })
+  // One selected month shared by Home, both ledgers and Reports. Any month of the supported range can be viewed
+  // (before the first entry, empty months, future months); viewing never changes data.
+  const [month, setMonthState] = useState(() => initialMonth(readLocal(MONTH_KEY)))
   const setMonth = useCallback((m: string) => {
-    setMonthState(m)
-    writeLocal(MONTH_KEY, m)
+    const next = parseMonthInput(m)
+    if (next === null) return // invalid or outside the supported range: keep the current selection
+    setMonthState(next)
+    writeLocal(MONTH_KEY, next)
   }, [])
-
-  const { minMonth, maxMonth } = useMemo(() => {
-    const now = currentMonth()
-    let lo = now
-    let hi = now
-    for (const t of txs ?? []) {
-      if (t.deletedAt !== undefined) continue
-      if (t.month < lo) lo = t.month
-      if (t.month > hi) hi = t.month
-    }
-    return { minMonth: addMonths(lo, -24), maxMonth: addMonths(hi, 1) }
-  }, [txs])
-
-  const clamped = month < minMonth ? minMonth : month > maxMonth ? maxMonth : month
   const closings = useMemo(() => closingRows ?? [], [closingRows])
   const ready = closingRows === undefined || household === undefined ? undefined : txs
   const { members, categories } = useMemo(() => {
@@ -45,8 +33,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     return h
   }, [household])
   const value = useMemo(
-    () => ({ txs: ready, closings, members, categories, needsSetup: household !== undefined && members.length === 0, month: clamped, setMonth, minMonth, maxMonth }),
-    [ready, closings, members, categories, household, clamped, setMonth, minMonth, maxMonth],
+    () => ({ txs: ready, closings, members, categories, needsSetup: household !== undefined && members.length === 0, month, setMonth }),
+    [ready, closings, members, categories, household, month, setMonth],
   )
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>
 }
