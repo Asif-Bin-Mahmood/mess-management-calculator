@@ -144,6 +144,8 @@ export function ImpactView({ impact }: { impact: CorrectionImpact }) {
   const later = impact.laterMonths
   const range = later.length === 1 ? monthLabel(later[0]) : `${shortMonthLabel(later[0])} – ${shortMonthLabel(later[later.length - 1])}`
   const changed = impact.members.filter((m) => m.before !== m.after)
+  // Member-paid Bazar keeps no shared cash: the cash row is shown only if cash is left from the cash method.
+  const showCash = !impact.memberPaid || impact.cashBefore !== 0 || impact.cashAfter !== 0
   return (
     <div className="impact">
       <p>
@@ -160,11 +162,13 @@ export function ImpactView({ impact }: { impact: CorrectionImpact }) {
           </tr>
         </thead>
         <tbody>
-          <tr className={impact.cashBefore !== impact.cashAfter ? 'changed' : ''}>
-            <th scope="row">Cash</th>
-            <td className="num">{formatTaka(impact.cashBefore)}</td>
-            <td className="num">{formatTaka(impact.cashAfter)}</td>
-          </tr>
+          {showCash && (
+            <tr className={impact.cashBefore !== impact.cashAfter ? 'changed' : ''}>
+              <th scope="row">Cash</th>
+              <td className="num">{formatTaka(impact.cashBefore)}</td>
+              <td className="num">{formatTaka(impact.cashAfter)}</td>
+            </tr>
+          )}
           {impact.members.map((m) => (
             <tr key={m.memberId} className={m.before !== m.after ? 'changed' : ''}>
               <th scope="row">{memberName(m.memberId)}</th>
@@ -176,7 +180,7 @@ export function ImpactView({ impact }: { impact: CorrectionImpact }) {
       </table>
       {changed.length === 0 && impact.cashBefore === impact.cashAfter && <p className="muted">Later totals stay the same.</p>}
       {impact.closingEffects.map((e) => (
-        <ClosedMonthEffect key={e.sourceMonth} e={e} />
+        <ClosedMonthEffect key={e.sourceMonth} e={e} memberPaid={impact.memberPaid} />
       ))}
     </div>
   )
@@ -247,7 +251,7 @@ export function OpeningTable({
 }
 
 /** How a change affects one closed month: original vs current figures; the recorded decision is kept. */
-function ClosedMonthEffect({ e }: { e: ClosingEffectChange }) {
+function ClosedMonthEffect({ e, memberPaid }: { e: ClosingEffectChange; memberPaid: boolean }) {
   const src = monthLabel(e.sourceMonth)
   const next = monthLabel(e.closing.targetMonth)
   const counted = e.closing.method !== 'carry' && e.closing.cashMode === 'set'
@@ -265,7 +269,7 @@ function ClosedMonthEffect({ e }: { e: ClosingEffectChange }) {
       openBefore: e.openingBefore.balances[id] ?? 0,
     })),
     { key: 'cash', name: 'Cash', orig: e.original.cash, now: e.closingAfter.cash, open: e.openingAfter.cash, openBefore: e.openingBefore.cash },
-  ]
+  ].filter((r) => !(memberPaid && r.key === 'cash' && r.orig === 0 && r.now === 0 && r.open === 0 && r.openBefore === 0))
   return (
     <div className="warn warn-block">
       <p>

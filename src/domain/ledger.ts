@@ -612,6 +612,8 @@ export interface CorrectionImpact {
   closingEffects: ClosingEffectChange[]
   /** Closed months from changedMonth on (whether or not their adjustments change). */
   closedMonths: string[]
+  /** True when every affected month is member-paid Bazar (no shared cash). */
+  memberPaid: boolean
 }
 
 function latest(...ms: (string | null)[]): string {
@@ -680,6 +682,7 @@ export function analyzeCorrection(
     members: memberChanges(roster, b, a),
     closingEffects,
     closedMonths,
+    memberPaid: isMemberPaidMonth(method, ledger, changedMonth),
   }
 }
 

@@ -83,6 +83,8 @@ export interface RosterPlan {
   impact: RosterChangeImpact
   /** Months (per ledger) that would have spending but nobody sharing it; such changes are refused. */
   unsharedMonths: string[]
+  /** Member-paid Bazar amounts whose payer would no longer share their month; such changes are refused. */
+  paidOutsideMembership: { memberId: string; month: string }[]
 }
 
 /** Why a membership change is not allowed, or null. */
@@ -92,6 +94,12 @@ export function rosterPlanProblem(plan: RosterPlan): string | null {
   }
   if (plan.unsharedMonths.length) {
     return `Nobody would share the expenses of ${plan.unsharedMonths.map(monthLabel).join(', ')}. Keep at least one member for those months.`
+  }
+  if (plan.paidOutsideMembership.length) {
+    const first = plan.paidOutsideMembership[0]
+    const name = plan.after.find((m) => m.id === first.memberId)?.name ?? 'A member'
+    const months = [...new Set(plan.paidOutsideMembership.filter((p) => p.memberId === first.memberId).map((p) => p.month))]
+    return `${name} paid for Bazar in ${months.map(monthLabel).join(', ')}, so must share ${months.length === 1 ? 'that month' : 'those months'}. Change the membership months, or move or delete those Bazar amounts first.`
   }
   return null
 }
@@ -119,7 +127,16 @@ async function plan(database: MessDb, change: (members: Member[]) => Member[], n
   const months = new Set<string>()
   for (const t of transactions) if (t.deletedAt === undefined && (t.type === 'expense' || t.type === 'expenseRefund' || t.type === 'purchase')) months.add(t.month)
   const unsharedMonths = [...months].filter((mo) => !after.some((m) => sharesInPeriods(m.periods, mo))).sort()
-  return { before: members, after, impact, unsharedMonths }
+  // A member-paid Bazar amount belongs to a member sharing its month (a former member settles instead).
+  const paidOutsideMembership = transactions
+    .filter((t) => t.deletedAt === undefined && t.type === 'purchase' && t.memberId)
+    .filter((t) => {
+      const m = after.find((x) => x.id === t.memberId)
+      return !m || !sharesInPeriods(m.periods, t.month)
+    })
+    .map((t) => ({ memberId: t.memberId!, month: t.month }))
+    .sort((a, b) => a.month.localeCompare(b.month))
+  return { before: members, after, impact, unsharedMonths, paidOutsideMembership }
 }
 
 function sharesInPeriods(periods: readonly MembershipPeriod[], month: string): boolean {

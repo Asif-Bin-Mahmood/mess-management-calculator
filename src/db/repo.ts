@@ -80,6 +80,9 @@ function build(m: Mutation, existing: Transaction | undefined, now: number, h: E
   if ((existing.type === 'expense' || existing.type === 'expenseRefund' || existing.type === 'purchase') && sharers(h.members, existing.month).length === 0) {
     throw new ValidationError({ date: `No member shares expenses in ${monthLabel(existing.month)}. Add or restore a member for that month first.` })
   }
+  if (existing.type === 'purchase' && !sharers(h.members, existing.month).some((m) => m.id === existing.memberId)) {
+    throw new ValidationError({ memberId: `This member does not share ${monthLabel(existing.month)}, so the Bazar amount cannot be restored. Record a settlement for an old balance instead.` })
+  }
   const restored = { ...existing, updatedAt: now }
   delete restored.deletedAt
   return restored
