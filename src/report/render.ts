@@ -4,7 +4,7 @@
  */
 import { formatTaka } from '../domain/money'
 import { dayLabel } from '../domain/month'
-import { categoryName, memberName, members, UTILITY_CATEGORIES } from '../domain/types'
+import { categoryName, displayCategoryList, memberName } from '../domain/household'
 import { balanceLabel, balanceStatus, txCashEffect, txTitle, type Report } from './reportModel'
 
 export const PAGE_W = 1240
@@ -189,7 +189,9 @@ function layout<T extends CanvasLike>(p: Painter<T>, r: Report, opts: ReportOpti
   p.rect(M, p.y, 10, 104, accent, 5)
   p.text(`${r.ledgerName} — ${r.monthLabel}`, M + 34, p.y + 60, { size: 54, weight: 800 })
   const gen = r.generatedAt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
-  p.text(`Mess Ledger · ${members().map((m) => m.name).join(', ')} · Prepared ${gen}`, M + 34, p.y + 100, { size: 22, color: C.muted, maxW: CONTENT_W - 34 })
+  const sharing = s.sharers.map(memberName)
+  const who = sharing.length === 0 ? 'no members sharing' : sharing.length <= 5 ? sharing.join(', ') : `${sharing.length} members sharing`
+  p.text(`Mess Ledger · ${who} · Prepared ${gen}`, M + 34, p.y + 100, { size: 22, color: C.muted, maxW: CONTENT_W - 34 })
   p.y += 140
 
   // ── Financial summary
@@ -233,30 +235,40 @@ function layout<T extends CanvasLike>(p: Painter<T>, r: Report, opts: ReportOpti
     { label: 'Contributed', w: 340, align: 'right' },
     { label: 'Due / will receive', w: CONTENT_W - 640, align: 'right' },
   ]
-  section('Members', 52 + 4 * 68 + 40)
+  section('Members', 52 + Math.min(4, Math.max(1, s.members.length)) * 68 + 40)
   header(memberCols)
+  if (s.members.length === 0) p.text('No members this month.', M, p.y + 40, { size: 24, color: C.muted })
   for (const m of s.members) {
     const status = balanceStatus(m.closing)
+    const sharingNow = s.sharers.includes(m.memberId)
     row(memberCols, [
-      { s: memberName(m.memberId), weight: 700 },
+      { s: sharingNow ? memberName(m.memberId) : `${memberName(m.memberId)} (left)`, weight: 700 },
       { s: t(m.netContribution) },
       { s: balanceLabel(m.closing), weight: 700, color: status === 'due' ? C.due : status === 'receivable' ? C.receivable : C.muted },
     ])
   }
   p.y += 34
-  p.text(`Each member’s share of spending: ${t(s.averagePerPerson)}`, M, p.y, { size: 21, color: C.muted, maxW: CONTENT_W })
+  p.text(
+    s.sharers.length ? `Each sharing member’s share of spending: ${t(s.averagePerPerson)} (${s.sharers.length} sharing)` : 'Nobody shares this month’s spending.',
+    M,
+    p.y,
+    { size: 21, color: C.muted, maxW: CONTENT_W },
+  )
 
   // ── Utilities categories (compact, two columns)
-  if (s.categoryTotals) {
+  // Categories used this month, in the household's order (archived ones included; unknown ids last).
+  const usedCategories = s.categoryTotals ? reportCategories(s.categoryTotals) : []
+  if (s.categoryTotals && usedCategories.length) {
     const totals = s.categoryTotals
-    section('By category', 3 * 60)
+    section('By category', Math.min(3, Math.ceil(usedCategories.length / 2)) * 60)
     const colW = (CONTENT_W - 40) / 2
-    UTILITY_CATEGORIES.forEach((c, i) => {
+    usedCategories.forEach((id, i) => {
       const col = i % 2
       const x = M + col * (colW + 40)
       if (col === 0 && i > 0) p.y += 60
-      p.text(categoryName(c.id), x, p.y + 30, { size: 25, weight: 600 })
-      p.text(t(totals[c.id]), x + colW, p.y + 30, { size: 25, weight: 700, align: 'right' })
+      p.ensure(60)
+      p.text(categoryName(id), x, p.y + 30, { size: 25, weight: 600, maxW: colW - 220 })
+      p.text(t(totals[id] ?? 0), x + colW, p.y + 30, { size: 25, weight: 700, align: 'right' })
       p.hline(p.y + 48, C.line, x, colW)
     })
     p.y += 60
@@ -349,4 +361,10 @@ export function renderReportImage(r: Report, opts: ReportOptions = {}): HTMLCanv
 /** A4-sized pages for PDF export. */
 export function renderReportPages(r: Report, opts: ReportOptions = {}): HTMLCanvasElement[] {
   return layoutReport(r, domCanvas, true, opts)
+}
+
+/** Category ids with entries this month, in the household's category order (unknown ids last). */
+export function reportCategories(totals: Record<string, number>): string[] {
+  const order = new Map(displayCategoryList().map((c, i) => [c.id, i]))
+  return Object.keys(totals).sort((a, b) => (order.get(a) ?? 1e9) - (order.get(b) ?? 1e9) || (a < b ? -1 : 1))
 }

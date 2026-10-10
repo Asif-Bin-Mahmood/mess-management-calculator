@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { analyzeCorrection, buildClosing, computeLedgerMonth, type ClosingInput, type MemberMap, type MonthSummary } from './ledger'
-import { tx } from './testUtils'
+import { R4, tx } from './testUtils'
 import type { LedgerId, MonthClosing, Transaction } from './types'
 
 const balances = (s: MonthSummary, key: 'opening' | 'closing') => Object.fromEntries(s.members.map((m) => [m.memberId, m[key]])) as MemberMap
@@ -51,13 +51,13 @@ for (const ledger of ['bazar', 'utilities'] as const) {
       for (const change of ['add', 'edit', 'delete'] as Change[]) {
         it(`${name} — ${change}`, () => {
           const base = september(ledger)
-          const closing: MonthClosing = buildClosing({ ledger, sourceMonth: '2026-09', ...m }, base, [], 'c1', 1)
-          const before = computeLedgerMonth(ledger, base, '2026-10', [closing])
+          const closing: MonthClosing = buildClosing({ ledger, sourceMonth: '2026-09', ...m }, R4, base, [], 'c1', 1)
+          const before = computeLedgerMonth(ledger, R4, base, '2026-10', [closing])
           const recordedAdj = { ...before.opening.memberAdjustments }
           const recordedCashAdj = before.opening.cashAdjustment
 
           const changed = lateChange(base, change, ledger)
-          const after = computeLedgerMonth(ledger, changed, '2026-10', [closing])
+          const after = computeLedgerMonth(ledger, R4, changed, '2026-10', [closing])
           const eff = EFFECT[change]
 
           // 1. The adjustment recorded at closing is never recalculated.
@@ -90,7 +90,7 @@ for (const ledger of ['bazar', 'utilities'] as const) {
           expect(after.reconciliation.explainedDifference).toBe(before.reconciliation.explainedDifference)
           // September itself shows the corrected figures; history of the closing snapshot is untouched.
           expect(closing.snapshot.closingCash).toBe(1000_00)
-          expect(computeLedgerMonth(ledger, changed, '2026-09', [closing]).remainingCash).toBe(1000_00 + eff.cash)
+          expect(computeLedgerMonth(ledger, R4, changed, '2026-09', [closing]).remainingCash).toBe(1000_00 + eff.cash)
         })
       }
     }
@@ -102,8 +102,8 @@ describe('audit scenario figures', () => {
   const late = [...base, tx('bazar', 'expense', 400, '2026-09-28')]
 
   it('B settled: Ovi’s recorded settlement stays ৳1,000 and the late ৳100 share is due in October', () => {
-    const c = buildClosing({ ledger: 'bazar', sourceMonth: '2026-09', method: 'settled', settlementKind: 'settled', cashMode: 'carry' }, base, [], 'c', 1)
-    const oct = computeLedgerMonth('bazar', late, '2026-10', [c])
+    const c = buildClosing({ ledger: 'bazar', sourceMonth: '2026-09', method: 'settled', settlementKind: 'settled', cashMode: 'carry' }, R4, base, [], 'c', 1)
+    const oct = computeLedgerMonth('bazar', R4, late, '2026-10', [c])
     expect(oct.opening.memberAdjustments.ovi).toBe(1000_00)
     expect(balances(oct, 'opening')).toEqual({ asif: -100_00, dipu: -100_00, yusha: -100_00, ovi: -100_00 })
     expect(oct.openingCash).toBe(600_00)
@@ -112,13 +112,13 @@ describe('audit scenario figures', () => {
 
   it('C verified: no +৳100 or +৳400 adjustment is invented', () => {
     const c = buildClosing(
-      { ledger: 'bazar', sourceMonth: '2026-09', method: 'manual', cashMode: 'set', openingCash: 1000_00, openingBalances: { asif: 2000_00, dipu: 500_00, yusha: -500_00, ovi: -1000_00 } },
+      { ledger: 'bazar', sourceMonth: '2026-09', method: 'manual', cashMode: 'set', openingCash: 1000_00, openingBalances: { asif: 2000_00, dipu: 500_00, yusha: -500_00, ovi: -1000_00 } }, R4,
       base,
       [],
       'c',
       1,
     )
-    const oct = computeLedgerMonth('bazar', late, '2026-10', [c])
+    const oct = computeLedgerMonth('bazar', R4, late, '2026-10', [c])
     expect(Object.values(oct.opening.memberAdjustments)).toEqual([0, 0, 0, 0])
     expect(oct.opening.cashAdjustment).toBe(0)
     expect(balances(oct, 'opening')).toEqual({ asif: 1900_00, dipu: 400_00, yusha: -600_00, ovi: -1100_00 })
@@ -127,17 +127,17 @@ describe('audit scenario figures', () => {
   })
 
   it('closings made before this fix (no stored adjustments) are read from their snapshot', () => {
-    const c = buildClosing({ ledger: 'bazar', sourceMonth: '2026-09', method: 'settled', settlementKind: 'waived', cashMode: 'carry' }, base, [], 'c', 1)
+    const c = buildClosing({ ledger: 'bazar', sourceMonth: '2026-09', method: 'settled', settlementKind: 'waived', cashMode: 'carry' }, R4, base, [], 'c', 1)
     const legacy = { ...c } as MonthClosing
     delete legacy.adjustments
     // Compare the computed figures; the summaries embed the two (intentionally different) records.
     const figures = (s: MonthSummary) => ({ members: s.members, cash: s.openingCash, rec: s.reconciliation, info: { ...s.opening, closing: null } })
-    expect(figures(computeLedgerMonth('bazar', late, '2026-10', [legacy]))).toEqual(figures(computeLedgerMonth('bazar', late, '2026-10', [c])))
+    expect(figures(computeLedgerMonth('bazar', R4, late, '2026-10', [legacy]))).toEqual(figures(computeLedgerMonth('bazar', R4, late, '2026-10', [c])))
   })
 
   it('the correction preview shows original, current and corrected figures', () => {
-    const c = buildClosing({ ledger: 'bazar', sourceMonth: '2026-09', method: 'settled', settlementKind: 'waived', cashMode: 'set', openingCash: 1000_00 }, base, [], 'c', 1)
-    const impact = analyzeCorrection('bazar', base, late, '2026-09', '2026-10', [c])!
+    const c = buildClosing({ ledger: 'bazar', sourceMonth: '2026-09', method: 'settled', settlementKind: 'waived', cashMode: 'set', openingCash: 1000_00 }, R4, base, [], 'c', 1)
+    const impact = analyzeCorrection('bazar', R4, base, late, '2026-09', '2026-10', [c])!
     const e = impact.closingEffects[0]
     expect(e.sourceMonth).toBe('2026-09')
     expect(e.original.cash).toBe(1000_00)
@@ -154,12 +154,12 @@ describe('audit scenario figures', () => {
 
   it('a late change in Bazar never alters Utilities, and vice versa', () => {
     const util = september('utilities')
-    const cu = buildClosing({ ledger: 'utilities', sourceMonth: '2026-09', method: 'settled', settlementKind: 'waived', cashMode: 'set', openingCash: 1000_00 }, util, [], 'cu', 1)
-    const cb = buildClosing({ ledger: 'bazar', sourceMonth: '2026-09', method: 'carry', cashMode: 'carry' }, base, [], 'cb', 2)
-    const utilBefore = computeLedgerMonth('utilities', [...util, ...base], '2026-10', [cu, cb])
-    expect(computeLedgerMonth('utilities', [...util, ...late], '2026-10', [cu, cb])).toEqual(utilBefore)
-    const bazarBefore = computeLedgerMonth('bazar', [...util, ...base], '2026-10', [cu, cb])
+    const cu = buildClosing({ ledger: 'utilities', sourceMonth: '2026-09', method: 'settled', settlementKind: 'waived', cashMode: 'set', openingCash: 1000_00 }, R4, util, [], 'cu', 1)
+    const cb = buildClosing({ ledger: 'bazar', sourceMonth: '2026-09', method: 'carry', cashMode: 'carry' }, R4, base, [], 'cb', 2)
+    const utilBefore = computeLedgerMonth('utilities', R4, [...util, ...base], '2026-10', [cu, cb])
+    expect(computeLedgerMonth('utilities', R4, [...util, ...late], '2026-10', [cu, cb])).toEqual(utilBefore)
+    const bazarBefore = computeLedgerMonth('bazar', R4, [...util, ...base], '2026-10', [cu, cb])
     const utilLate = [...util, tx('utilities', 'expense', 400, '2026-09-28', { category: 'wifi' })]
-    expect(computeLedgerMonth('bazar', [...utilLate, ...base], '2026-10', [cu, cb])).toEqual(bazarBefore)
+    expect(computeLedgerMonth('bazar', R4, [...utilLate, ...base], '2026-10', [cu, cb])).toEqual(bazarBefore)
   })
 })

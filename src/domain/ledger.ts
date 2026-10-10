@@ -9,19 +9,11 @@
  * boundary, when a closing decision sets the next month's openings. Those changes are recorded as explicit
  * opening adjustments; reconciliation reports any difference the recorded adjustments do not explain.
  */
+import { bySeq, firstDifferentMonth, sharers, type CategoryId, type MemberId, type Roster } from './household'
 import { addMonths, monthIndex, monthLabel, monthRange } from './month'
-import {
-  MEMBER_IDS,
-  UTILITY_CATEGORIES,
-  type LedgerId,
-  type MemberId,
-  type MonthClosing,
-  type Poisha,
-  type Transaction,
-  type UtilityCategory,
-} from './types'
+import type { LedgerId, MemberMap, MonthClosing, Poisha, Transaction } from './types'
 
-export type MemberMap = Record<MemberId, Poisha>
+export type { MemberMap } from './types'
 
 export interface MonthOpening {
   cash: Poisha
@@ -103,19 +95,51 @@ export interface MonthSummary {
   expenseRefunds: Poisha
   totalSpent: Poisha
   remainingCash: Poisha
-  /** totalSpent / 4, rounded half away from zero to the poisha (display only) */
+  /** totalSpent / number of members sharing the month, rounded half away from zero (display only). */
   averagePerPerson: Poisha
+  /** Members sharing this month's expenses, in rounding order. */
+  sharers: MemberId[]
+  /** Spending that could not be shared because nobody shares the month (shows as unreconciled). */
+  unallocatedSpend: Poisha
+  /**
+   * Rows shown for the month, in roster order: members who share it, plus anyone with a balance carried in or
+   * an entry this month (e.g. a member who left and still has a balance). A row's share is 0 if not sharing.
+   */
   members: MemberSummary[]
-  /** Net spend per category; utilities only (null for bazar). */
-  categoryTotals: Record<UtilityCategory, Poisha> | null
+  /** Net spend per category used this month; utilities only (null for bazar). Missing category = 0. */
+  categoryTotals: Record<CategoryId, Poisha> | null
   reconciliation: Reconciliation
   transactionCount: number
   /** Active closing decision for this month (this month as source), if any. */
   closing: MonthClosing | null
 }
 
+/** An empty member map (a missing member counts as 0). */
 export function zeroMembers(): MemberMap {
-  return { asif: 0, dipu: 0, yusha: 0, ovi: 0 }
+  return {}
+}
+
+export function amountOf(map: MemberMap | undefined, id: MemberId): Poisha {
+  return map?.[id] ?? 0
+}
+
+function keysOf(...maps: (MemberMap | undefined)[]): Set<MemberId> {
+  const out = new Set<MemberId>()
+  for (const m of maps) if (m) for (const k of Object.keys(m)) out.add(k)
+  return out
+}
+
+/** Member ids in roster order (unknown ids, which only damaged data could contain, last by id). */
+export function inRosterOrder(roster: Roster, ids: Iterable<MemberId>): MemberId[] {
+  const seq = new Map(roster.map((m) => [m.id, m.seq]))
+  return [...new Set(ids)].sort((a, b) => {
+    const sa = seq.get(a)
+    const sb = seq.get(b)
+    if (sa !== undefined && sb !== undefined) return sa - sb
+    if (sa !== undefined) return -1
+    if (sb !== undefined) return 1
+    return a < b ? -1 : a > b ? 1 : 0
+  })
 }
 
 export const EMPTY_OPENING: MonthOpening = { cash: 0, balances: zeroMembers() }
@@ -134,19 +158,21 @@ const START_INFO: OpeningInfo = {
 }
 
 /**
- * Splits `total` poisha into four integer shares that sum exactly to `total`.
- * base = floor(total / 4); the 0–3 leftover poisha go one each to members in the fixed
- * order of MEMBER_IDS (members 1 → 4), starting at (monthIndex mod 4) so the extra rotates.
+ * Splits `total` poisha equally among the n sharing members (given in rounding order) so the shares sum exactly
+ * to `total`: base = floor(total / n); the 0…n−1 leftover poisha go one each to consecutive members starting at
+ * position (monthIndex mod n), so the extra poisha rotate from month to month. Deterministic.
+ * With no sharers nothing is allocated (the caller reports the amount as unallocated).
  */
-export function allocateShares(total: Poisha, month: string): MemberMap {
+export function allocateShares(total: Poisha, month: string, sharerIds: readonly MemberId[]): MemberMap {
   if (!Number.isSafeInteger(total)) throw new Error('total must be an integer number of poisha')
-  const n = MEMBER_IDS.length
+  const n = sharerIds.length
+  const shares = zeroMembers()
+  if (n === 0) return shares
   const base = Math.floor(total / n)
   const remainder = total - base * n
   const start = ((monthIndex(month) % n) + n) % n
-  const shares = zeroMembers()
-  MEMBER_IDS.forEach((id) => (shares[id] = base))
-  for (let k = 0; k < remainder; k++) shares[MEMBER_IDS[(start + k) % n]] += 1
+  sharerIds.forEach((id) => (shares[id] = base))
+  for (let k = 0; k < remainder; k++) shares[sharerIds[(start + k) % n]] += 1
   return shares
 }
 
@@ -166,6 +192,7 @@ function sum(xs: readonly number[]): number {
  */
 export function computeMonth(
   ledger: LedgerId,
+  roster: Roster,
   month: string,
   opening: MonthOpening,
   transactions: readonly Transaction[],
@@ -179,26 +206,26 @@ export function computeMonth(
   const returned = zeroMembers()
   let expensesGross = 0
   let expenseRefunds = 0
-  const categoryTotals =
-    ledger === 'utilities'
-      ? (Object.fromEntries(UTILITY_CATEGORIES.map((c) => [c.id, 0])) as Record<UtilityCategory, Poisha>)
-      : null
+  const categoryTotals: Record<CategoryId, Poisha> | null = ledger === 'utilities' ? {} : null
+  const addCat = (c: CategoryId, v: Poisha) => {
+    if (categoryTotals) categoryTotals[c] = (categoryTotals[c] ?? 0) + v
+  }
 
   for (const t of txs) {
     switch (t.type) {
       case 'contribution':
-        contributed[t.memberId!] += t.amount
+        contributed[t.memberId!] = amountOf(contributed, t.memberId!) + t.amount
         break
       case 'memberRefund':
-        returned[t.memberId!] += t.amount
+        returned[t.memberId!] = amountOf(returned, t.memberId!) + t.amount
         break
       case 'expense':
         expensesGross += t.amount
-        if (categoryTotals && t.category) categoryTotals[t.category] += t.amount
+        if (t.category) addCat(t.category, t.amount)
         break
       case 'expenseRefund':
         expenseRefunds += t.amount
-        if (categoryTotals && t.category) categoryTotals[t.category] -= t.amount
+        if (t.category) addCat(t.category, -t.amount)
         break
     }
   }
@@ -208,23 +235,31 @@ export function computeMonth(
   const totalCollected = contributionsGross - memberRefunds
   const totalSpent = expensesGross - expenseRefunds
   const remainingCash = opening.cash + totalCollected - totalSpent
-  const shares = allocateShares(totalSpent, month)
+  const sharing = sharers(roster, month).map((m) => m.id)
+  const shares = allocateShares(totalSpent, month, sharing)
+  const unallocatedSpend = sharing.length === 0 ? totalSpent : 0
 
-  const members: MemberSummary[] = MEMBER_IDS.map((id) => {
-    const netContribution = contributed[id] - returned[id]
+  const rowIds = inRosterOrder(roster, [
+    ...sharing,
+    ...[...keysOf(opening.balances)].filter((id) => opening.balances[id] !== 0),
+    ...keysOf(contributed, returned),
+  ])
+  const members: MemberSummary[] = rowIds.map((id) => {
+    const netContribution = amountOf(contributed, id) - amountOf(returned, id)
+    const share = amountOf(shares, id)
     return {
       memberId: id,
-      opening: opening.balances[id],
-      contributed: contributed[id],
-      returned: returned[id],
+      opening: amountOf(opening.balances, id),
+      contributed: amountOf(contributed, id),
+      returned: amountOf(returned, id),
       netContribution,
-      share: shares[id],
-      closing: opening.balances[id] + netContribution - shares[id],
+      share,
+      closing: amountOf(opening.balances, id) + netContribution - share,
     }
   })
 
   const closingBalanceSum = sum(members.map((m) => m.closing))
-  const openingBalanceSum = sum(MEMBER_IDS.map((id) => opening.balances[id]))
+  const openingBalanceSum = sum(Object.values(opening.balances))
   const difference = closingBalanceSum - remainingCash
   const unexplained = difference - explainedBefore
   const unknownDifference = unexplained - correctionBefore
@@ -244,7 +279,9 @@ export function computeMonth(
     expenseRefunds,
     totalSpent,
     remainingCash,
-    averagePerPerson: roundHalfAwayFromZero(totalSpent / MEMBER_IDS.length),
+    averagePerPerson: sharing.length ? roundHalfAwayFromZero(totalSpent / sharing.length) : 0,
+    sharers: sharing,
+    unallocatedSpend,
     members,
     categoryTotals,
     reconciliation: {
@@ -274,9 +311,9 @@ export function closingAsOpening(s: MonthSummary): MonthOpening {
 export function decidedOpening(closing: MonthClosing): MonthOpening {
   const snap = closing.snapshot
   const balances = zeroMembers()
-  for (const id of MEMBER_IDS) {
+  for (const id of keysOf(snap.closingBalances, closing.method === 'manual' ? closing.openingBalances : undefined)) {
     balances[id] =
-      closing.method === 'carry' ? snap.closingBalances[id] : closing.method === 'settled' ? 0 : (closing.openingBalances?.[id] ?? 0)
+      closing.method === 'carry' ? amountOf(snap.closingBalances, id) : closing.method === 'settled' ? 0 : amountOf(closing.openingBalances, id)
   }
   const cash = closing.method !== 'carry' && closing.cashMode === 'set' ? (closing.openingCash ?? 0) : snap.closingCash
   return { cash, balances }
@@ -290,7 +327,9 @@ export function closingAdjustments(closing: MonthClosing): { members: MemberMap;
   if (closing.adjustments) return { members: { ...closing.adjustments.members }, cash: closing.adjustments.cash }
   const d = decidedOpening(closing)
   const members = zeroMembers()
-  for (const id of MEMBER_IDS) members[id] = d.balances[id] - closing.snapshot.closingBalances[id]
+  for (const id of keysOf(d.balances, closing.snapshot.closingBalances)) {
+    members[id] = amountOf(d.balances, id) - amountOf(closing.snapshot.closingBalances, id)
+  }
   return { members, cash: d.cash - closing.snapshot.closingCash }
 }
 
@@ -316,10 +355,8 @@ export function openingFromClosing(prev: MonthSummary, closing: MonthClosing | n
   const decided = decidedOpening(closing)
   const corrections = zeroMembers()
   const balances = zeroMembers()
-  for (const id of MEMBER_IDS) {
-    corrections[id] = carried.balances[id] - snap.closingBalances[id]
-    balances[id] = carried.balances[id] + adj.members[id]
-  }
+  for (const id of keysOf(carried.balances, snap.closingBalances)) corrections[id] = amountOf(carried.balances, id) - amountOf(snap.closingBalances, id)
+  for (const id of keysOf(carried.balances, adj.members)) balances[id] = amountOf(carried.balances, id) + amountOf(adj.members, id)
   const cashCorrection = carried.cash - snap.closingCash
   const countedCash = closing.method !== 'carry' && closing.cashMode === 'set'
   const cash = countedCash ? decided.cash : carried.cash
@@ -335,7 +372,7 @@ export function openingFromClosing(prev: MonthSummary, closing: MonthClosing | n
       memberCorrections: corrections,
       cashCorrection,
       unappliedCashCorrection: countedCash ? cashCorrection : 0,
-      sourceChangedSinceClosing: cashCorrection !== 0 || MEMBER_IDS.some((id) => corrections[id] !== 0),
+      sourceChangedSinceClosing: cashCorrection !== 0 || Object.values(corrections).some((v) => v !== 0),
     },
   }
 }
@@ -379,6 +416,7 @@ export function lastMonth(ledger: LedgerId, transactions: readonly Transaction[]
  */
 export function computeHistory(
   ledger: LedgerId,
+  roster: Roster,
   transactions: readonly Transaction[],
   untilMonth: string,
   closings: readonly MonthClosing[] = [],
@@ -394,7 +432,7 @@ export function computeHistory(
   let start = firstMonth(ledger, transactions)
   for (const m of active.keys()) if (start === null || m < start) start = m
   if (start === null || start > untilMonth) {
-    return [computeMonth(ledger, untilMonth, EMPTY_OPENING, [], START_INFO, 0, active.get(untilMonth) ?? null)]
+    return [computeMonth(ledger, roster, untilMonth, EMPTY_OPENING, [], START_INFO, 0, active.get(untilMonth) ?? null)]
   }
 
   const out: MonthSummary[] = []
@@ -406,7 +444,7 @@ export function computeHistory(
     explained += sum(Object.values(info.memberAdjustments)) - info.cashAdjustment
     corrected += info.unappliedCashCorrection
     const closing = active.get(m) ?? null
-    const summary = computeMonth(ledger, m, opening, byMonth.get(m) ?? [], info, explained, closing, corrected)
+    const summary = computeMonth(ledger, roster, m, opening, byMonth.get(m) ?? [], info, explained, closing, corrected)
     out.push(summary)
     ;({ opening, info } = openingFromClosing(summary, closing))
   }
@@ -415,11 +453,12 @@ export function computeHistory(
 
 export function computeLedgerMonth(
   ledger: LedgerId,
+  roster: Roster,
   transactions: readonly Transaction[],
   month: string,
   closings: readonly MonthClosing[] = [],
 ): MonthSummary {
-  const history = computeHistory(ledger, transactions, month, closings)
+  const history = computeHistory(ledger, roster, transactions, month, closings)
   return history[history.length - 1]
 }
 
@@ -475,6 +514,7 @@ function latest(...ms: (string | null)[]): string {
  */
 export function analyzeCorrection(
   ledger: LedgerId,
+  roster: Roster,
   before: readonly Transaction[],
   after: readonly Transaction[],
   changedMonth: string,
@@ -485,8 +525,8 @@ export function analyzeCorrection(
   const lastClosingTarget = [...active.values()].map((c) => c.targetMonth).sort().pop() ?? null
   const end = latest(horizon, lastMonth(ledger, before), lastMonth(ledger, after), lastClosingTarget)
   if (changedMonth >= end) return null
-  const hb = computeHistory(ledger, before, end, closings)
-  const ha = computeHistory(ledger, after, end, closings)
+  const hb = computeHistory(ledger, roster, before, end, closings)
+  const ha = computeHistory(ledger, roster, after, end, closings)
   const b = hb[hb.length - 1]
   const a = ha[ha.length - 1]
   const byMonthA = new Map(ha.map((s) => [s.month, s]))
@@ -525,10 +565,17 @@ export function analyzeCorrection(
     horizon: end,
     cashBefore: b.remainingCash,
     cashAfter: a.remainingCash,
-    members: MEMBER_IDS.map((id, i) => ({ memberId: id, before: b.members[i].closing, after: a.members[i].closing })),
+    members: memberChanges(roster, b, a),
     closingEffects,
     closedMonths,
   }
+}
+
+/** Closing balance of every member shown in either summary, before and after (0 when not shown). */
+export function memberChanges(roster: Roster, before: MonthSummary, after: MonthSummary): MemberChange[] {
+  const b = new Map(before.members.map((m) => [m.memberId, m.closing]))
+  const a = new Map(after.members.map((m) => [m.memberId, m.closing]))
+  return inRosterOrder(roster, [...b.keys(), ...a.keys()]).map((id) => ({ memberId: id, before: b.get(id) ?? 0, after: a.get(id) ?? 0 }))
 }
 
 /* ───────────── Closing decisions ───────────── */
@@ -572,12 +619,13 @@ export function canClose(ledger: LedgerId, sourceMonth: string, closings: readon
 /** Builds the closing record for confirmation. Pure; validation is done by validateClosingInput. */
 export function buildClosing(
   input: ClosingInput,
+  roster: Roster,
   transactions: readonly Transaction[],
   closings: readonly MonthClosing[],
   id: string,
   now: number,
 ): MonthClosing {
-  const source = computeLedgerMonth(input.ledger, transactions, input.sourceMonth, closings)
+  const source = computeLedgerMonth(input.ledger, roster, transactions, input.sourceMonth, closings)
   const balances = zeroMembers()
   for (const m of source.members) balances[m.memberId] = m.closing
   const sourceTxs = transactions.filter((t) => t.ledger === input.ledger && t.month === input.sourceMonth)
@@ -598,7 +646,10 @@ export function buildClosing(
   }
   if (input.method === 'settled') c.settlementKind = input.settlementKind ?? 'settled'
   if (c.cashMode === 'set') c.openingCash = input.openingCash ?? 0
-  if (input.method === 'manual') c.openingBalances = { ...zeroMembers(), ...input.openingBalances }
+  if (input.method === 'manual') {
+    // One verified opening balance for each member shown in the closed month (missing = 0).
+    c.openingBalances = Object.fromEntries(source.members.map((m) => [m.memberId, amountOf(input.openingBalances, m.memberId)]))
+  }
   const note = input.note?.trim()
   if (note) c.note = note
   c.adjustments = closingAdjustments(c)
@@ -615,12 +666,13 @@ export interface ClosingPreview {
 
 export function previewClosing(
   closing: MonthClosing,
+  roster: Roster,
   transactions: readonly Transaction[],
   closings: readonly MonthClosing[],
 ): ClosingPreview {
   const all = [...closings, closing]
-  const source = computeLedgerMonth(closing.ledger, transactions, closing.sourceMonth, all)
-  const target = computeLedgerMonth(closing.ledger, transactions, closing.targetMonth, all)
+  const source = computeLedgerMonth(closing.ledger, roster, transactions, closing.sourceMonth, all)
+  const target = computeLedgerMonth(closing.ledger, roster, transactions, closing.targetMonth, all)
   const laterTransactionCount = transactions.filter(
     (t) => t.ledger === closing.ledger && t.deletedAt === undefined && t.month >= closing.targetMonth,
   ).length
@@ -645,6 +697,7 @@ export interface UndoAnalysis {
 
 export function analyzeUndo(
   closing: MonthClosing,
+  roster: Roster,
   transactions: readonly Transaction[],
   closings: readonly MonthClosing[],
   horizon: string,
@@ -655,10 +708,10 @@ export function analyzeUndo(
     .sort((a, b) => b.sourceMonth.localeCompare(a.sourceMonth))
   const without = closings.map((c) => (c.id === closing.id ? { ...c, undoneAt: c.undoneAt ?? 0 } : c))
   const end = latest(horizon, closing.targetMonth, lastMonth(ledger, transactions))
-  const nowTarget = computeLedgerMonth(ledger, transactions, closing.targetMonth, closings)
-  const afterTarget = computeLedgerMonth(ledger, transactions, closing.targetMonth, without)
-  const nowEnd = computeLedgerMonth(ledger, transactions, end, closings)
-  const afterEnd = computeLedgerMonth(ledger, transactions, end, without)
+  const nowTarget = computeLedgerMonth(ledger, roster, transactions, closing.targetMonth, closings)
+  const afterTarget = computeLedgerMonth(ledger, roster, transactions, closing.targetMonth, without)
+  const nowEnd = computeLedgerMonth(ledger, roster, transactions, end, closings)
+  const afterEnd = computeLedgerMonth(ledger, roster, transactions, end, without)
   const openingOf = (s: MonthSummary): MonthOpening => {
     const balances = zeroMembers()
     for (const m of s.members) balances[m.memberId] = m.opening
@@ -673,7 +726,7 @@ export function analyzeUndo(
     openingNow: openingOf(nowTarget),
     openingAfter: openingOf(afterTarget),
     horizon: end,
-    members: MEMBER_IDS.map((id, i) => ({ memberId: id, before: nowEnd.members[i].closing, after: afterEnd.members[i].closing })),
+    members: memberChanges(roster, nowEnd, afterEnd),
     cashBefore: nowEnd.remainingCash,
     cashAfter: afterEnd.remainingCash,
   }
@@ -704,14 +757,15 @@ export interface MemberReturnCheck {
  */
 export function checkMemberReturn(
   ledger: LedgerId,
+  roster: Roster,
   transactions: readonly Transaction[],
   closings: readonly MonthClosing[],
   ret: { memberId: MemberId; amount: Poisha; month: string },
   excludeId?: string,
 ): MemberReturnCheck {
   const others = transactions.filter((t) => t.ledger === ledger && t.id !== excludeId)
-  const s = computeLedgerMonth(ledger, others, ret.month, closings)
-  const balanceBefore = s.members.find((m) => m.memberId === ret.memberId)!.closing
+  const s = computeLedgerMonth(ledger, roster, others, ret.month, closings)
+  const balanceBefore = s.members.find((m) => m.memberId === ret.memberId)?.closing ?? 0
   const cashBefore = s.remainingCash
   return {
     memberId: ret.memberId,
@@ -771,3 +825,116 @@ export function monthClosingStatus(
   if (check.availableFrom) return { kind: 'not-yet', availableFrom: check.availableFrom }
   return { kind: 'blocked', reason: check.reason }
 }
+
+/* ───────────── Membership changes ───────────── */
+
+/** Latest month closed (active closing) in either ledger, or null. Membership is household-wide. */
+export function latestClosedMonth(closings: readonly MonthClosing[]): string | null {
+  let last: string | null = null
+  for (const ledger of ['utilities', 'bazar'] as const) {
+    for (const m of activeClosings(ledger, closings).keys()) if (last === null || m > last) last = m
+  }
+  return last
+}
+
+/** First month whose sharing may still change: the month after the latest closed month (null = any month). */
+export function firstOpenMonth(closings: readonly MonthClosing[]): string | null {
+  const last = latestClosedMonth(closings)
+  return last === null ? null : addMonths(last, 1)
+}
+
+export interface RosterLedgerImpact {
+  ledger: LedgerId
+  horizon: string
+  /** Months whose member figures or cash change. */
+  changedMonths: string[]
+  /** Members whose balance at the horizon changes. */
+  members: MemberChange[]
+}
+
+export interface RosterChangeImpact {
+  /** Earliest month whose sharing changes ('' = from the very beginning), or null if sharing does not change. */
+  firstChangedMonth: string | null
+  /** Latest closed month when the change would alter who shares a closed month; such changes are refused. */
+  blockedBy: string | null
+  ledgers: RosterLedgerImpact[]
+}
+
+/**
+ * Effect of replacing roster `before` by `after` on both ledgers (membership is household-wide).
+ * A change that alters who shares a closed month is refused (blockedBy): closed months are never recalculated.
+ */
+export function analyzeRosterChange(
+  before: Roster,
+  after: Roster,
+  transactions: readonly Transaction[],
+  closings: readonly MonthClosing[],
+  horizon: string,
+): RosterChangeImpact {
+  const ids = new Set([...before.map((m) => m.id), ...after.map((m) => m.id)])
+  let first: string | null = null
+  for (const id of ids) {
+    const pb = before.find((m) => m.id === id)?.periods ?? []
+    const pa = after.find((m) => m.id === id)?.periods ?? []
+    const d = firstDifferentMonth(pb, pa, horizon)
+    if (d !== null && (first === null || d < first)) first = d
+  }
+  const lastClosed = latestClosedMonth(closings)
+  const blockedBy = first !== null && lastClosed !== null && first <= lastClosed ? lastClosed : null
+  const ledgers: RosterLedgerImpact[] = []
+  for (const ledger of ['utilities', 'bazar'] as const) {
+    const end = latest(horizon, lastMonth(ledger, transactions))
+    const hb = computeHistory(ledger, before, transactions, end, closings)
+    const ha = computeHistory(ledger, after, transactions, end, closings)
+    const byA = new Map(ha.map((x) => [x.month, x]))
+    const changedMonths = hb
+      .filter((x) => {
+        const y = byA.get(x.month)
+        if (!y) return true
+        if (x.remainingCash !== y.remainingCash || x.averagePerPerson !== y.averagePerPerson) return true
+        const shares = (s: MonthSummary) => JSON.stringify(s.members.map((m) => [m.memberId, m.share, m.closing]))
+        return shares(x) !== shares(y)
+      })
+      .map((x) => x.month)
+    ledgers.push({
+      ledger,
+      horizon: end,
+      changedMonths,
+      members: memberChanges(after, hb[hb.length - 1], ha[ha.length - 1]).filter((c) => c.before !== c.after),
+    })
+  }
+  return { firstChangedMonth: first, blockedBy, ledgers }
+}
+
+/** Each member's balance per ledger at `month`, or at the ledger's latest month if later (positive = will receive). */
+export function memberBalances(
+  roster: Roster,
+  transactions: readonly Transaction[],
+  closings: readonly MonthClosing[],
+  month: string,
+): Record<LedgerId, MemberMap> {
+  const out = { utilities: {}, bazar: {} } as Record<LedgerId, MemberMap>
+  for (const ledger of ['utilities', 'bazar'] as const) {
+    const end = latest(month, lastMonth(ledger, transactions))
+    for (const m of computeLedgerMonth(ledger, roster, transactions, end, closings).members) out[ledger][m.memberId] = m.closing
+  }
+  return out
+}
+
+/** True when any transaction (including deleted ones) or closing refers to the member. */
+export function memberIsReferenced(id: MemberId, transactions: readonly Transaction[], closings: readonly MonthClosing[]): boolean {
+  if (transactions.some((t) => t.memberId === id)) return true
+  return closings.some(
+    (c) =>
+      id in c.snapshot.closingBalances ||
+      (c.openingBalances !== undefined && id in c.openingBalances) ||
+      (c.adjustments !== undefined && id in c.adjustments.members),
+  )
+}
+
+/** True when any transaction (including deleted ones) uses the category. */
+export function categoryIsReferenced(id: CategoryId, transactions: readonly Transaction[]): boolean {
+  return transactions.some((t) => t.category === id)
+}
+
+export { bySeq }

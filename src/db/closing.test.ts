@@ -6,6 +6,8 @@ import { BACKUP_SCHEMA_VERSION, checkBackup, createBackup, getRestoreUndo, impor
 import { applyClosing, ClosingError, planClosing, planUndoClosing, undoClosing } from './closing'
 import { MessDb } from './db'
 import { applyMutation } from './repo'
+import { R4 } from '../domain/testUtils'
+import { seedLegacyHousehold } from './testDb'
 
 let db: MessDb
 let n = 0
@@ -15,6 +17,7 @@ beforeEach(async () => {
   n += 1
   db = new MessDb(`closing-${n}`)
   await db.open()
+  await seedLegacyHousehold(db)
 })
 
 afterEach(async () => {
@@ -38,7 +41,7 @@ async function ledgerRows(ledger: LedgerId) {
 }
 
 async function month(ledger: LedgerId, m: string) {
-  return computeLedgerMonth(ledger, await db.transactions.toArray(), m, await db.closings.toArray())
+  return computeLedgerMonth(ledger, R4, await db.transactions.toArray(), m, await db.closings.toArray())
 }
 
 describe('closing a month', () => {

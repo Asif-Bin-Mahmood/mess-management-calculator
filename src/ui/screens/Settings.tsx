@@ -1,24 +1,38 @@
 import { useEffect, useRef, useState } from 'react'
-import { backupFileName, checkBackup, createBackup, eraseAll, getRestoreUndo, importStatus, restoreBackup, undoLastRestore, type BackupScope, type RestoreProgress } from '../../db/backup'
+import {
+  backupFileName,
+  checkBackup,
+  createBackup,
+  eraseAll,
+  getRestoreUndo,
+  importStatus,
+  planRestore,
+  restoreBackup,
+  undoLastRestore,
+  type BackupScope,
+  type RestoreProgress,
+} from '../../db/backup'
 import { lastBackupAtQuery, restoreUndoQuery } from '../queries'
-import { requestPersistentStorage, saveMemberNames, setMeta } from '../../db/repo'
+import { requestPersistentStorage, setMeta } from '../../db/repo'
 import { formatTaka } from '../../domain/money'
 import { dayLabel, monthLabel } from '../../domain/month'
-import { ledgerName, MEMBER_IDS, MAX_MEMBER_NAME, sameMemberNames, validateMemberNames, type MemberId } from '../../domain/types'
+import { isCurrentMember } from '../../domain/household'
+import { currentMonth } from '../../domain/month'
+import { ledgerName } from '../../domain/types'
 import { canShareFiles, isNativeApp, saveFile, shareFile } from '../../report/export'
 import { txTitle } from '../../report/reportModel'
 import { useApp } from '../context'
 import { useMutate } from '../useMutate'
 import { TopBar } from '../common'
 import { useConfirm, useToast } from '../context'
-import { useLive } from '../hooks'
+import { navigate, useLive } from '../hooks'
 import { Icon } from '../icons'
 import { useInstallPrompt } from '../pwa'
-import { blockBack, useLeaveGuard } from '../backNav'
+import { blockBack } from '../backNav'
 import { useUpdates } from '../../update/context'
 
 export function Settings() {
-  const { txs, memberNames } = useApp()
+  const { txs } = useApp()
   const toast = useToast()
   const confirm = useConfirm()
   const mutate = useMutate()
@@ -120,6 +134,11 @@ export function Settings() {
     }
     const s = check.summary
     const status = await importStatus(check.data)
+    const reg = await planRestore(check.data)
+    if (reg.problem) {
+      await confirm({ title: 'This backup cannot be restored here', body: <p>{reg.problem}</p>, confirmLabel: 'OK', cancelLabel: null })
+      return
+    }
     if (status.identical) {
       await confirm({
         title: 'Nothing to restore',
@@ -162,10 +181,28 @@ export function Settings() {
               <dt>Months</dt>
               <dd>{s.firstMonth ? `${monthLabel(s.firstMonth)} – ${monthLabel(s.lastMonth!)}` : '—'}</dd>
             </div>
-            {s.scope === 'all' && s.memberNames && !sameMemberNames(s.memberNames, memberNames) && (
+            {s.scope === 'all' && (
               <div>
-                <dt>Member names</dt>
-                <dd>{MEMBER_IDS.map((id) => s.memberNames![id]).join(', ')}</dd>
+                <dt>Members</dt>
+                <dd>{reg.members.map((m) => m.name).join(', ') || '—'}</dd>
+              </div>
+            )}
+            {s.scope === 'all' && reg.renamed.length > 0 && (
+              <div>
+                <dt>Renamed</dt>
+                <dd>{reg.renamed.map((r) => `${r.from} → ${r.to}`).join(', ')}</dd>
+              </div>
+            )}
+            {s.scope !== 'all' && reg.membersAdded.length > 0 && (
+              <div>
+                <dt>Members added</dt>
+                <dd>{reg.membersAdded.join(', ')}</dd>
+              </div>
+            )}
+            {reg.categoriesAdded.length > 0 && (
+              <div>
+                <dt>{s.scope === 'all' ? 'Categories' : 'Categories added'}</dt>
+                <dd>{s.scope === 'all' ? reg.categories.map((c) => c.name).join(', ') : reg.categoriesAdded.join(', ')}</dd>
               </div>
             )}
           </dl>
@@ -244,7 +281,7 @@ export function Settings() {
       <TopBar title="Backup & settings" />
       {restoring && <RestoreOverlay p={restoring} />}
 
-      <MembersCard />
+      <HouseholdCard />
 
       <section className="card" aria-labelledby="bk-h">
         <div className="card-head">
@@ -407,9 +444,10 @@ export function Settings() {
         </div>
         <ul className="how">
           <li>Utilities and Bazar are separate ledgers with their own cash and balances.</li>
-          <li>Each month’s spending is split equally by four. Leftover poisha go to one member at a time, rotating monthly.</li>
+          <li>Each month’s spending is split equally among the members sharing that month. Leftover poisha go to one member at a time, rotating monthly.</li>
           <li>Balance = last month’s balance + paid this month − share. Positive means the member will receive money back; negative means the member is due to pay.</li>
-          <li>Closing balances and cash carry into the next month automatically. The four balances always add up to the cash in hand.</li>
+          <li>Closing balances and cash carry into the next month automatically. The members’ balances always add up to the cash in hand.</li>
+          <li>A member who leaves keeps their balance until it is settled with an entry or a month closing; nothing is moved onto other members.</li>
         </ul>
       </section>
 
@@ -460,69 +498,43 @@ function RestoreOverlay({ p }: { p: { phase: string; done: number; total: number
   )
 }
 
-/** Rename the four members. Only display names change; records keep their permanent member ids. */
-function MembersCard() {
-  const { memberNames } = useApp()
-  const toast = useToast()
-  const [draft, setDraft] = useState<Record<MemberId, string>>(memberNames)
-  const [errors, setErrors] = useState<Partial<Record<MemberId, string>>>({})
-  const [busy, setBusy] = useState(false)
-  const [lastSaved, setLastSaved] = useState(memberNames)
-  if (!sameMemberNames(lastSaved, memberNames)) {
-    // Names changed elsewhere (e.g. a restore): show the new ones.
-    setLastSaved(memberNames)
-    setDraft(memberNames)
-  }
-  const changed = MEMBER_IDS.some((id) => draft[id].trim() !== memberNames[id])
-  useLeaveGuard(changed, 'name changes')
-
-  async function save() {
-    const { errors: errs } = validateMemberNames(draft)
-    setErrors(errs)
-    if (Object.keys(errs).length) return
-    setBusy(true)
-    try {
-      await saveMemberNames(draft)
-      toast({ message: 'Member names saved' })
-    } catch (e) {
-      toast({ message: e instanceof Error ? e.message : String(e), tone: 'error' })
-    } finally {
-      setBusy(false)
-    }
-  }
-
+/** Entry point to the household screens: members and Utilities categories. */
+function HouseholdCard() {
+  const { members, categories } = useApp()
+  const now = currentMonth()
+  const current = members.filter((m) => isCurrentMember(m, now))
+  const former = members.length - current.length
+  const activeCats = categories.filter((c) => c.archivedAt === undefined)
   return (
-    <section className="card" aria-labelledby="mem-h">
+    <section className="card" aria-labelledby="hh-h">
       <div className="card-head">
-        <h2 id="mem-h" className="card-title">
-          Members
+        <h2 id="hh-h" className="card-title">
+          Household
         </h2>
       </div>
-      <p className="card-text">Names shown in both ledgers and in reports. Renaming never changes amounts, balances or history.</p>
-      <div className="member-names">
-        {MEMBER_IDS.map((id, i) => (
-          <label key={id} className="field">
-            <span className="field-label">Member {i + 1}</span>
-            <input
-              className="input"
-              value={draft[id]}
-              maxLength={MAX_MEMBER_NAME}
-              autoComplete="off"
-              onChange={(e) => setDraft((d) => ({ ...d, [id]: e.target.value }))}
-              aria-invalid={!!errors[id]}
-              aria-describedby={errors[id] ? `mem-err-${id}` : undefined}
-            />
-            {errors[id] && (
-              <span className="field-error" id={`mem-err-${id}`}>
-                {errors[id]}
+      <ul className="link-list">
+        <li>
+          <button type="button" className="link-row" onClick={() => navigate('settings/members')}>
+            <span className="link-row-main">
+              <span className="link-row-title">Members</span>
+              <span className="link-row-sub">
+                {current.length} current{former ? ` · ${former} former` : ''}
+                {current.length ? ` · ${current.map((m) => m.name).slice(0, 4).join(', ')}${current.length > 4 ? '…' : ''}` : ''}
               </span>
-            )}
-          </label>
-        ))}
-      </div>
-      <button type="button" className="btn btn-primary" onClick={save} disabled={!changed || busy}>
-        Save names
-      </button>
+            </span>
+            <Icon name="right" size={18} />
+          </button>
+        </li>
+        <li>
+          <button type="button" className="link-row" onClick={() => navigate('settings/categories')}>
+            <span className="link-row-main">
+              <span className="link-row-title">Utilities categories</span>
+              <span className="link-row-sub">{activeCats.length ? `${activeCats.length} in use · ${activeCats.map((c) => c.name).slice(0, 3).join(', ')}${activeCats.length > 3 ? '…' : ''}` : 'None yet'}</span>
+            </span>
+            <Icon name="right" size={18} />
+          </button>
+        </li>
+      </ul>
     </section>
   )
 }

@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import { lastBackupAtQuery } from '../queries'
 import { computeLedgerMonth } from '../../domain/ledger'
-import { LEDGERS, memberName, members, type LedgerId, type MonthClosing, type Transaction } from '../../domain/types'
+import { sharers, type Roster } from '../../domain/household'
+import { LEDGERS, memberName, type LedgerId, type MonthClosing, type Transaction } from '../../domain/types'
 import { balanceStatus, dashboardAlerts } from '../../report/reportModel'
 import { useApp } from '../context'
 import { Avatar, LedgerIcon, Money, MonthSwitcher } from '../common'
@@ -11,7 +12,7 @@ import { Icon } from '../icons'
 const DAY = 86_400_000
 
 export function Home() {
-  const { txs, closings, month, setMonth, minMonth, maxMonth, memberNamesSet } = useApp()
+  const { txs, closings, month, setMonth, minMonth, maxMonth, members } = useApp()
   const lastBackupAt = useLive(lastBackupAtQuery)
   const [now] = useState(() => Date.now())
   const liveCount = txs?.filter((t) => t.deletedAt === undefined).length ?? 0
@@ -22,23 +23,14 @@ export function Home() {
       <header className="home-head">
         <div>
           <p className="eyebrow">Mess Ledger</p>
-          <h1 className="home-title">{members().map((m) => m.name).join(' · ')}</h1>
+          <h1 className="home-title">{householdTitle(members, month)}</h1>
         </div>
       </header>
-      {!memberNamesSet && (
-        <button type="button" className="notice notice-neutral" onClick={() => navigate('settings')}>
-          <Icon name="info" />
-          <span>
-            <strong>Name your members.</strong> Replace Member 1–4 with the names used in your mess.
-          </span>
-          <Icon name="right" size={18} />
-        </button>
-      )}
       <MonthSwitcher month={month} onChange={setMonth} min={minMonth} max={maxMonth} />
 
       <div className="stack">
         {LEDGERS.map((l) => (
-          <LedgerCard key={l.id} ledger={l.id} month={month} txs={txs ?? []} closings={closings} />
+          <LedgerCard key={l.id} ledger={l.id} roster={members} month={month} txs={txs ?? []} closings={closings} />
         ))}
       </div>
 
@@ -55,8 +47,15 @@ export function Home() {
   )
 }
 
-function LedgerCard({ ledger, month, txs, closings }: { ledger: LedgerId; month: string; txs: Transaction[]; closings: MonthClosing[] }) {
-  const s = useMemo(() => computeLedgerMonth(ledger, txs, month, closings), [ledger, txs, month, closings])
+/** Members sharing the viewed month: their names for a small household, otherwise a count. */
+function householdTitle(roster: Roster, month: string): string {
+  const names = sharers(roster, month).map((m) => m.name)
+  if (names.length === 0) return 'No members this month'
+  return names.length <= 4 ? names.join(' · ') : `${names.length} members`
+}
+
+function LedgerCard({ ledger, roster, month, txs, closings }: { ledger: LedgerId; roster: Roster; month: string; txs: Transaction[]; closings: MonthClosing[] }) {
+  const s = useMemo(() => computeLedgerMonth(ledger, roster, txs, month, closings), [ledger, roster, txs, month, closings])
   const name = ledger === 'utilities' ? 'Utilities' : 'Bazar'
   const due = s.members.filter((m) => m.closing < 0)
   const recv = s.members.filter((m) => m.closing > 0)

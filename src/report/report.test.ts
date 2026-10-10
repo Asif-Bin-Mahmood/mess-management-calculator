@@ -1,9 +1,10 @@
 import { beforeAll, describe, expect, it } from 'vitest'
-import { LEGACY_MEMBER_NAMES, setMemberNames } from '../domain/types'
+import { legacyCategories, legacyMembers, setHouseholdDisplay } from '../domain/household'
 
 // Display names used in these tests (ids are fixed; names are configurable).
-beforeAll(() => setMemberNames(LEGACY_MEMBER_NAMES))
-import { tx } from '../domain/testUtils'
+// The household of an upgraded v1.1.1 installation (original names and categories).
+beforeAll(() => setHouseholdDisplay(legacyMembers(), legacyCategories()))
+import { R4, tx } from '../domain/testUtils'
 import { buildPdf } from './pdf'
 import { balanceLabel, buildReport, roundingNote, txCashEffect } from './reportModel'
 
@@ -17,7 +18,7 @@ describe('buildReport', () => {
     tx('utilities', 'expense', 999, '2026-10-06', { category: 'others', deletedAt: 5 }),
     tx('bazar', 'expense', 700, '2026-10-05'),
   ]
-  const r = buildReport('utilities', '2026-10', txs, [], new Date('2026-10-09T12:00:00'))
+  const r = buildReport('utilities', R4, '2026-10', txs, [], new Date('2026-10-09T12:00:00'))
 
   it('contains only this ledger and month, sorted by date', () => {
     expect(r.transactions.map((t) => t.date)).toEqual(['2026-10-02', '2026-10-04', '2026-10-05'])
@@ -32,7 +33,8 @@ describe('buildReport', () => {
     expect(s.remainingCash).toBe(1000_00 + 500_00 - 1800_01)
     const net = r.transactions.reduce((a, t) => a + txCashEffect(t), 0)
     expect(s.openingCash + net).toBe(s.remainingCash)
-    expect(s.categoryTotals).toEqual({ service: 0, current: 1500_01, gas: 0, wifi: 300_00, others: 0 })
+    // Categories with entries this month (the deleted Others expense does not count); others are ৳0.
+    expect(s.categoryTotals).toEqual({ current: 1500_01, wifi: 300_00 })
     const catSum = Object.values(s.categoryTotals!).reduce((a, b) => a + b, 0)
     expect(catSum).toBe(s.totalSpent)
     expect(s.members.find((m) => m.memberId === 'asif')!.opening).toBe(2000_00 - 250_00)
@@ -40,7 +42,7 @@ describe('buildReport', () => {
   })
 
   it('has no categories for Bazar', () => {
-    expect(buildReport('bazar', '2026-10', txs).summary.categoryTotals).toBeNull()
+    expect(buildReport('bazar', R4, '2026-10', txs).summary.categoryTotals).toBeNull()
   })
 
   it('labels balances and explains rounding', () => {

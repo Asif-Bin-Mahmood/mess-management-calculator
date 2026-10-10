@@ -12,14 +12,14 @@ import {
   type ClosingInput,
   type MonthSummary,
 } from './ledger'
-import { tx } from './testUtils'
+import { R4, tx } from './testUtils'
 import type { MemberId, MonthClosing, Transaction } from './types'
 
 const ids: MemberId[] = ['asif', 'dipu', 'yusha', 'ovi']
 const m = (s: MonthSummary, id: MemberId) => s.members.find((x) => x.memberId === id)!
 let n = 0
 const close = (input: Partial<ClosingInput> & Pick<ClosingInput, 'ledger' | 'sourceMonth' | 'method'>, txs: Transaction[], closings: MonthClosing[] = []) =>
-  buildClosing({ cashMode: 'carry', ...input }, txs, closings, `c${++n}`, 1000 + n)
+  buildClosing({ cashMode: 'carry', ...input }, R4, txs, closings, `c${++n}`, 1000 + n)
 
 // September: unequal contributions, spending ৳4000 (৳1000 each)
 const sep: Transaction[] = [
@@ -33,7 +33,7 @@ const sep: Transaction[] = [
 describe('Option A — carry forward', () => {
   it('opens the next month with each closing balance and the closing cash, exactly once', () => {
     const c = close({ ledger: 'bazar', sourceMonth: '2026-09', method: 'carry' }, sep)
-    const oct = computeLedgerMonth('bazar', sep, '2026-10', [c])
+    const oct = computeLedgerMonth('bazar', R4, sep, '2026-10', [c])
     expect(oct.openingCash).toBe(1000_00)
     expect(ids.map((id) => m(oct, id).opening)).toEqual([2000_00, 500_00, -500_00, -1000_00])
     expect(oct.opening.source).toBe('closing')
@@ -43,7 +43,7 @@ describe('Option A — carry forward', () => {
     expect(oct.totalCollected).toBe(0)
     expect(oct.reconciliation).toMatchObject({ difference: 0, unexplained: 0, balanced: true })
     // Same figures as the provisional carry-forward without a closing record.
-    const provisional = computeLedgerMonth('bazar', sep, '2026-10', [])
+    const provisional = computeLedgerMonth('bazar', R4, sep, '2026-10', [])
     expect(provisional.opening.source).toBe('carry')
     expect(provisional.members).toEqual(oct.members)
   })
@@ -52,7 +52,7 @@ describe('Option A — carry forward', () => {
 describe('Option B — settled member balances', () => {
   it('starts at zero member balances, keeps cash separate and records the adjustment explicitly', () => {
     const c = close({ ledger: 'bazar', sourceMonth: '2026-09', method: 'settled', settlementKind: 'waived' }, sep)
-    const oct = computeLedgerMonth('bazar', sep, '2026-10', [c])
+    const oct = computeLedgerMonth('bazar', R4, sep, '2026-10', [c])
     expect(ids.map((id) => m(oct, id).opening)).toEqual([0, 0, 0, 0])
     expect(oct.openingCash).toBe(1000_00) // cash is NOT reset
     expect(oct.opening.memberAdjustments).toEqual({ asif: -2000_00, dipu: -500_00, yusha: 500_00, ovi: 1000_00 })
@@ -69,7 +69,7 @@ describe('Option B — settled member balances', () => {
 
   it('can use a verified cash count instead of carrying cash', () => {
     const c = close({ ledger: 'bazar', sourceMonth: '2026-09', method: 'settled', settlementKind: 'settled', cashMode: 'set', openingCash: 950_00 }, sep)
-    const oct = computeLedgerMonth('bazar', sep, '2026-10', [c])
+    const oct = computeLedgerMonth('bazar', R4, sep, '2026-10', [c])
     expect(oct.openingCash).toBe(950_00)
     expect(oct.opening.cashAdjustment).toBe(-50_00)
     expect(oct.reconciliation.difference).toBe(-950_00)
@@ -77,9 +77,9 @@ describe('Option B — settled member balances', () => {
   })
 
   it('leaves the closed month and its transactions unchanged', () => {
-    const before = computeLedgerMonth('bazar', sep, '2026-09', [])
+    const before = computeLedgerMonth('bazar', R4, sep, '2026-09', [])
     const c = close({ ledger: 'bazar', sourceMonth: '2026-09', method: 'settled', settlementKind: 'settled' }, sep)
-    const after = computeLedgerMonth('bazar', sep, '2026-09', [c])
+    const after = computeLedgerMonth('bazar', R4, sep, '2026-09', [c])
     expect(after.members).toEqual(before.members)
     expect(after.remainingCash).toBe(before.remainingCash)
     expect(after.closing?.id).toBe(c.id)
@@ -101,7 +101,7 @@ describe('Option C — verified opening balances', () => {
       sep,
     )
     expect(c.cashMode).toBe('set')
-    const oct = computeLedgerMonth('bazar', sep, '2026-10', [c])
+    const oct = computeLedgerMonth('bazar', R4, sep, '2026-10', [c])
     expect(ids.map((id) => m(oct, id).opening)).toEqual([1500_00, 500_00, -400_00, -800_00])
     expect(oct.openingCash).toBe(800_00)
     expect(oct.opening.memberAdjustments).toEqual({ asif: -500_00, dipu: 0, yusha: 100_00, ovi: 200_00 })
@@ -109,7 +109,7 @@ describe('Option C — verified opening balances', () => {
     expect(oct.reconciliation.difference).toBe(800_00 - 800_00)
     expect(oct.reconciliation.unexplained).toBe(0)
     // September itself is unchanged.
-    expect(computeLedgerMonth('bazar', sep, '2026-09', [c]).remainingCash).toBe(1000_00)
+    expect(computeLedgerMonth('bazar', R4, sep, '2026-09', [c]).remainingCash).toBe(1000_00)
   })
 
   it('can set starting balances for a new ledger by closing the month before the first entries', () => {
@@ -118,7 +118,7 @@ describe('Option C — verified opening balances', () => {
       [],
     )
     const txs = [tx('utilities', 'expense', 400, '2026-09-03', { category: 'gas' })]
-    const s = computeLedgerMonth('utilities', txs, '2026-09', [c])
+    const s = computeLedgerMonth('utilities', R4, txs, '2026-09', [c])
     expect(s.openingCash).toBe(200_00)
     expect(m(s, 'asif').closing).toBe(100_00)
     expect(s.remainingCash).toBe(-200_00)
@@ -131,7 +131,7 @@ describe('history and later months', () => {
     const oct = [tx('bazar', 'contribution', 1000, '2026-10-02', { memberId: 'ovi' }), tx('bazar', 'expense', 2000, '2026-10-05')]
     const all = [...sep, ...oct]
     const c = close({ ledger: 'bazar', sourceMonth: '2026-09', method: 'settled', settlementKind: 'settled' }, all)
-    const [s, o, nov] = computeHistory('bazar', all, '2026-11', [c])
+    const [s, o, nov] = computeHistory('bazar', R4, all, '2026-11', [c])
     expect(s.totalSpent).toBe(4000_00)
     expect(o.totalSpent).toBe(2000_00)
     expect(o.totalCollected).toBe(1000_00)
@@ -148,7 +148,7 @@ describe('history and later months', () => {
   it('flags a closed month whose figures changed after the closing was confirmed', () => {
     const c = close({ ledger: 'bazar', sourceMonth: '2026-09', method: 'settled', settlementKind: 'waived' }, sep)
     const corrected = [...sep, tx('bazar', 'expense', 400, '2026-09-20')]
-    const oct = computeLedgerMonth('bazar', corrected, '2026-10', [c])
+    const oct = computeLedgerMonth('bazar', R4, corrected, '2026-10', [c])
     expect(oct.opening.sourceChangedSinceClosing).toBe(true)
     // The waiver recorded at closing stands; the late ৳100 share each is carried into October as due.
     expect(oct.opening.memberAdjustments).toEqual({ asif: -2000_00, dipu: -500_00, yusha: 500_00, ovi: 1000_00 })
@@ -160,7 +160,7 @@ describe('history and later months', () => {
   it('reports how a correction affects a closed month without changing its recorded adjustment', () => {
     const c = close({ ledger: 'bazar', sourceMonth: '2026-09', method: 'settled', settlementKind: 'waived' }, sep)
     const corrected = [...sep, tx('bazar', 'expense', 400, '2026-09-20')]
-    const impact = analyzeCorrection('bazar', sep, corrected, '2026-09', '2026-10', [c])!
+    const impact = analyzeCorrection('bazar', R4, sep, corrected, '2026-09', '2026-10', [c])!
     expect(impact.closedMonths).toEqual(['2026-09'])
     expect(impact.closingEffects).toHaveLength(1)
     const e = impact.closingEffects[0]
@@ -170,7 +170,7 @@ describe('history and later months', () => {
   })
 
   it('detects an unexplained difference instead of hiding it', () => {
-    const s = computeMonth('bazar', '2026-09', { cash: 100_00, balances: EMPTY_OPENING.balances }, [])
+    const s = computeMonth('bazar', R4, '2026-09', { cash: 100_00, balances: EMPTY_OPENING.balances }, [])
     expect(s.reconciliation.difference).toBe(-100_00)
     expect(s.reconciliation.unexplained).toBe(-100_00)
     expect(s.reconciliation.balanced).toBe(false)
@@ -194,7 +194,7 @@ describe('closing safeguards', () => {
   it('previews without changing anything', () => {
     const c = close({ ledger: 'bazar', sourceMonth: '2026-09', method: 'settled', settlementKind: 'settled' }, sep)
     const frozen = Object.freeze([...sep])
-    const p = previewClosing(c, frozen, [])
+    const p = previewClosing(c, R4, frozen, [])
     expect(p.target.members.every((x) => x.opening === 0)).toBe(true)
     expect(p.source.remainingCash).toBe(1000_00)
   })
@@ -203,7 +203,7 @@ describe('closing safeguards', () => {
 describe('undo analysis', () => {
   it('returns the target month to provisional carry-forward', () => {
     const c = close({ ledger: 'bazar', sourceMonth: '2026-09', method: 'settled', settlementKind: 'waived' }, sep)
-    const a = analyzeUndo(c, sep, [c], '2026-10')
+    const a = analyzeUndo(c, R4, sep, [c], '2026-10')
     expect(a.blockedBy).toEqual([])
     expect(Object.values(a.openingNow.balances)).toEqual([0, 0, 0, 0])
     expect(a.openingAfter.balances).toEqual({ asif: 2000_00, dipu: 500_00, yusha: -500_00, ovi: -1000_00 })
@@ -215,10 +215,10 @@ describe('undo analysis', () => {
     const all = [...sep, ...oct]
     const c9 = close({ ledger: 'bazar', sourceMonth: '2026-09', method: 'settled', settlementKind: 'waived' }, all)
     const c10 = close({ ledger: 'bazar', sourceMonth: '2026-10', method: 'carry' }, all, [c9])
-    const a = analyzeUndo(c9, all, [c9, c10], '2026-10')
+    const a = analyzeUndo(c9, R4, all, [c9, c10], '2026-10')
     expect(a.blockedBy.map((c) => c.sourceMonth)).toEqual(['2026-10'])
     expect(a.dependentTransactionCount).toBe(1)
-    expect(analyzeUndo(c10, all, [c9, c10], '2026-10').blockedBy).toEqual([])
+    expect(analyzeUndo(c10, R4, all, [c9, c10], '2026-10').blockedBy).toEqual([])
   })
 })
 
@@ -227,10 +227,10 @@ describe('isolation with closings', () => {
     const util = [tx('utilities', 'contribution', 900, '2026-09-01', { memberId: 'dipu' }), tx('utilities', 'expense', 400, '2026-09-04', { category: 'wifi' })]
     const all = [...sep, ...util]
     const cu = close({ ledger: 'utilities', sourceMonth: '2026-09', method: 'settled', settlementKind: 'waived' }, all)
-    const bazarBefore = computeHistory('bazar', all, '2026-11', [])
-    const bazarAfter = computeHistory('bazar', all, '2026-11', [cu])
+    const bazarBefore = computeHistory('bazar', R4, all, '2026-11', [])
+    const bazarAfter = computeHistory('bazar', R4, all, '2026-11', [cu])
     expect(bazarAfter).toEqual(bazarBefore)
     const cb = close({ ledger: 'bazar', sourceMonth: '2026-09', method: 'manual', cashMode: 'set', openingCash: 0, openingBalances: { asif: 0, dipu: 0, yusha: 0, ovi: 0 } }, all)
-    expect(computeHistory('utilities', all, '2026-11', [cu, cb])).toEqual(computeHistory('utilities', all, '2026-11', [cu]))
+    expect(computeHistory('utilities', R4, all, '2026-11', [cu, cb])).toEqual(computeHistory('utilities', R4, all, '2026-11', [cu]))
   })
 })

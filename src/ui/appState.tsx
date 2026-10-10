@@ -1,9 +1,9 @@
 import { useCallback, useMemo, useState, type ReactNode } from 'react'
 import { db } from '../db/db'
 import { addMonths, currentMonth, isValidMonth } from '../domain/month'
-import { DEFAULT_MEMBER_NAMES, setMemberNames } from '../domain/types'
+import { setHouseholdDisplay } from '../domain/household'
 import { AppContext } from './context'
-import { memberNamesQuery } from './queries'
+import { householdQuery } from './queries'
 import { readLocal, useLive, writeLocal } from './hooks'
 
 const MONTH_KEY = 'mess-ledger:month'
@@ -13,7 +13,7 @@ const allClosings = () => db.closings.toArray()
 export function AppStateProvider({ children }: { children: ReactNode }) {
   const txs = useLive(allTransactions)
   const closingRows = useLive(allClosings)
-  const nameState = useLive(memberNamesQuery)
+  const household = useLive(householdQuery)
   const [month, setMonthState] = useState(() => {
     const saved = readLocal(MONTH_KEY)
     return saved && isValidMonth(saved) ? saved : currentMonth()
@@ -37,16 +37,16 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
   const clamped = month < minMonth ? minMonth : month > maxMonth ? maxMonth : month
   const closings = useMemo(() => closingRows ?? [], [closingRows])
-  const ready = closingRows === undefined || nameState === undefined ? undefined : txs
-  const memberNames = useMemo(() => {
-    const names = nameState?.names ?? DEFAULT_MEMBER_NAMES
-    // Display names are read by memberName()/members() during render (reports included); set them first.
-    setMemberNames(names)
-    return names
-  }, [nameState])
+  const ready = closingRows === undefined || household === undefined ? undefined : txs
+  const { members, categories } = useMemo(() => {
+    const h = household ?? { members: [], categories: [] }
+    // Display names are read by memberName()/categoryName() during render (reports included); set them first.
+    setHouseholdDisplay(h.members, h.categories)
+    return h
+  }, [household])
   const value = useMemo(
-    () => ({ txs: ready, closings, memberNames, memberNamesSet: !!nameState?.stored, month: clamped, setMonth, minMonth, maxMonth }),
-    [ready, closings, memberNames, nameState, clamped, setMonth, minMonth, maxMonth],
+    () => ({ txs: ready, closings, members, categories, needsSetup: household !== undefined && members.length === 0, month: clamped, setMonth, minMonth, maxMonth }),
+    [ready, closings, members, categories, household, clamped, setMonth, minMonth, maxMonth],
   )
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>
 }

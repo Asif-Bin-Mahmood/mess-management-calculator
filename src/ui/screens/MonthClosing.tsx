@@ -3,7 +3,7 @@ import { applyClosing, ClosingError } from '../../db/closing'
 import { buildClosing, canClose, computeLedgerMonth, monthClosingStatus, previewClosing, type ClosingInput, type MemberMap, type MonthSummary } from '../../domain/ledger'
 import { formatTaka, parseTaka, poishaToInput } from '../../domain/money'
 import { addMonths, currentMonth, monthLabel, shortMonthLabel } from '../../domain/month'
-import { closingMethodLabel, ledgerName, members, memberName, type ClosingMethod, type LedgerId, type MemberId, type SettlementKind } from '../../domain/types'
+import { closingMethodLabel, ledgerName, memberName, type ClosingMethod, type LedgerId, type MemberId, type SettlementKind } from '../../domain/types'
 import { MAX_DESCRIPTION } from '../../domain/validate'
 import { BalanceTag, EmptyState, Money, OpeningTable, TopBar } from '../common'
 import { runUndo } from '../closingFlow'
@@ -130,10 +130,12 @@ const METHODS: { id: ClosingMethod; title: string; text: string }[] = [
 ]
 
 export function CloseMonth({ ledger, month }: { ledger: LedgerId; month: string }) {
-  const { txs, closings, setMonth } = useApp()
+  const { txs, closings, setMonth, members } = useApp()
   const confirm = useConfirm()
   const toast = useToast()
-  const source = useMemo(() => computeLedgerMonth(ledger, txs ?? [], month, closings), [ledger, txs, month, closings])
+  const source = useMemo(() => computeLedgerMonth(ledger, members, txs ?? [], month, closings), [ledger, members, txs, month, closings])
+  // Members shown in the month being closed: each gets an opening balance in the next month.
+  const rows = source.members.map((m) => ({ id: m.memberId, name: memberName(m.memberId) }))
   const next = addMonths(month, 1)
 
   const [method, setMethod] = useState<ClosingMethod | null>(null)
@@ -150,11 +152,11 @@ export function CloseMonth({ ledger, month }: { ledger: LedgerId; month: string 
   const check = canClose(ledger, month, closings, currentMonth())
 
   const parsedCash = parseTaka(cash)
-  const parsedBal = Object.fromEntries(members().map((m) => [m.id, parseTaka(bal[m.id])])) as Record<MemberId, number | null>
+  const parsedBal = Object.fromEntries(rows.map((m) => [m.id, parseTaka(bal[m.id] ?? '')])) as Record<MemberId, number | null>
   const needCash = method === 'manual' || (method === 'settled' && cashMode === 'set')
   const errors: { cash?: string; bal: Partial<Record<MemberId, string>> } = { bal: {} }
   if (needCash && parsedCash === null) errors.cash = 'Enter the counted cash'
-  if (method === 'manual') for (const m of members()) if (parsedBal[m.id] === null) errors.bal[m.id] = 'Enter an amount (0 if settled)'
+  if (method === 'manual') for (const m of rows) if (parsedBal[m.id] === null) errors.bal[m.id] = 'Enter an amount (0 if settled)'
   const valid = method !== null && !errors.cash && Object.keys(errors.bal).length === 0
 
   const input: ClosingInput | null = valid
@@ -166,12 +168,12 @@ export function CloseMonth({ ledger, month }: { ledger: LedgerId; month: string 
         cashMode: method === 'manual' ? 'set' : method === 'settled' ? cashMode : 'carry',
         openingCash: needCash ? cashSign * parsedCash! : undefined,
         openingBalances:
-          method === 'manual' ? (Object.fromEntries(members().map((m) => [m.id, balSign[m.id] * parsedBal[m.id]!])) as MemberMap) : undefined,
+          method === 'manual' ? (Object.fromEntries(rows.map((m) => [m.id, (balSign[m.id] ?? 1) * parsedBal[m.id]!])) as MemberMap) : undefined,
         note: note.trim() || undefined,
       }
     : null
 
-  const preview = input && txs ? previewClosing(buildClosing(input, txs, closings, 'preview', 0), txs, closings) : null
+  const preview = input && txs ? previewClosing(buildClosing(input, members, txs, closings, 'preview', 0), members, txs, closings) : null
 
   if (!txs) return null
   if (source.closing) {
@@ -197,6 +199,9 @@ export function CloseMonth({ ledger, month }: { ledger: LedgerId; month: string 
           <p>
             Method: <strong>{closingMethodLabel({ method: input.method, settlementKind: input.settlementKind })}</strong>. {monthLabel(next)} will open as shown. Only the{' '}
             {ledgerName(ledger)} ledger is affected. You can undo this later.
+          </p>
+          <p className="field-hint">
+            Closing also fixes who shared {monthLabel(month)}. Membership changes (in both ledgers) can then only start from {monthLabel(next)}.
           </p>
           <OpeningTable
             before={closingBalances}
@@ -322,13 +327,13 @@ export function CloseMonth({ ledger, month }: { ledger: LedgerId; month: string 
       {method === 'manual' && (
         <fieldset className="field">
           <legend className="field-label">Opening balance for each member</legend>
-          {members().map((m) => (
+          {rows.map((m) => (
             <SignedAmount
               key={m.id}
               id={`bal-${m.id}`}
               label={m.name}
-              value={bal[m.id]}
-              sign={balSign[m.id]}
+              value={bal[m.id] ?? ''}
+              sign={balSign[m.id] ?? 1}
               onValue={(v) => setBal((b) => ({ ...b, [m.id]: v }))}
               onSign={(sg) => setBalSign((b) => ({ ...b, [m.id]: sg }))}
               negLabel="Due"

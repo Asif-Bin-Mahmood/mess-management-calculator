@@ -1,20 +1,21 @@
+import { sharers, type Category, type CategoryId, type Roster } from './household'
 import { closingAdjustments } from './ledger'
 import { MAX_AMOUNT } from './money'
-import { addMonths, isValidDate, isValidMonth, monthOf } from './month'
-import {
-  CLOSING_METHODS,
-  isMemberTx,
-  MEMBER_IDS,
-  TX_TYPES,
-  UTILITY_CATEGORIES,
-  type LedgerId,
-  type ClosingMethod,
-  type MemberId,
-  type MonthClosing,
-  type Transaction,
-  type TxType,
-  type UtilityCategory,
-} from './types'
+import { addMonths, isValidDate, isValidMonth, monthLabel, monthOf } from './month'
+import { CLOSING_METHODS, isMemberTx, TX_TYPES, type ClosingMethod, type LedgerId, type MemberId, type MonthClosing, type Transaction, type TxType } from './types'
+
+/**
+ * The household registry a transaction is checked against.
+ * - `entry`: true for entries made in the app now (new or edited). Then a Utilities category must not be
+ *   archived (except `keepCategory`, the category an edited entry already had), and an expense month must have
+ *   at least one member sharing it. Stored or imported records (`entry` false) only need existing references.
+ */
+export interface TxContext {
+  roster: Roster
+  categories: readonly Category[]
+  entry?: boolean
+  keepCategory?: CategoryId
+}
 
 /** The user-editable part of a transaction. */
 export interface TxInput {
@@ -23,7 +24,7 @@ export interface TxInput {
   amount: number
   date: string
   memberId?: MemberId
-  category?: UtilityCategory
+  category?: CategoryId
   description?: string
 }
 
@@ -31,7 +32,7 @@ export type TxErrors = Partial<Record<'ledger' | 'type' | 'amount' | 'date' | 'm
 
 export const MAX_DESCRIPTION = 200
 
-export function validateTxInput(tx: TxInput): TxErrors {
+export function validateTxInput(tx: TxInput, ctx: TxContext): TxErrors {
   const e: TxErrors = {}
   if (tx.ledger !== 'utilities' && tx.ledger !== 'bazar') e.ledger = 'Unknown ledger'
   if (!TX_TYPES.includes(tx.type)) e.type = 'Unknown transaction type'
@@ -41,14 +42,19 @@ export function validateTxInput(tx: TxInput): TxErrors {
 
   if (TX_TYPES.includes(tx.type)) {
     if (isMemberTx(tx.type)) {
-      if (!tx.memberId || !MEMBER_IDS.includes(tx.memberId)) e.memberId = 'Choose a member'
+      if (!tx.memberId || !ctx.roster.some((m) => m.id === tx.memberId)) e.memberId = 'Choose a member'
       if (tx.category !== undefined) e.category = 'Contributions have no category'
     } else {
       if (tx.memberId !== undefined) e.memberId = 'Expenses are not tied to a member'
       if (tx.ledger === 'utilities') {
-        if (!tx.category || !UTILITY_CATEGORIES.some((c) => c.id === tx.category)) e.category = 'Choose a category'
+        const cat = tx.category === undefined ? undefined : ctx.categories.find((c) => c.id === tx.category)
+        if (!cat) e.category = 'Choose a category'
+        else if (ctx.entry && cat.archivedAt !== undefined && cat.id !== ctx.keepCategory) e.category = 'This category is archived. Choose another one.'
       } else if (tx.category !== undefined) {
         e.category = 'Bazar expenses have no category'
+      }
+      if (ctx.entry && e.date === undefined && sharers(ctx.roster, monthOf(tx.date)).length === 0) {
+        e.date = `No member shares expenses in ${monthLabel(monthOf(tx.date))}. Add or restore a member for that month first.`
       }
     }
   }
@@ -60,12 +66,12 @@ export function validateTxInput(tx: TxInput): TxErrors {
 }
 
 /** Full structural validation for stored / imported records. Returns a list of problems. */
-export function validateTransaction(raw: unknown): string[] {
+export function validateTransaction(raw: unknown, ctx: TxContext): string[] {
   if (typeof raw !== 'object' || raw === null) return ['not an object']
   const t = raw as Partial<Transaction>
   const problems: string[] = []
   if (typeof t.id !== 'string' || t.id.length === 0 || t.id.length > 64) problems.push('invalid id')
-  const fieldErrors = validateTxInput(t as TxInput)
+  const fieldErrors = validateTxInput(t as TxInput, { roster: ctx.roster, categories: ctx.categories })
   problems.push(...Object.values(fieldErrors))
   if (typeof t.date === 'string' && t.month !== monthOf(t.date)) problems.push('month does not match date')
   if (!Number.isFinite(t.createdAt)) problems.push('invalid createdAt')
@@ -103,16 +109,20 @@ export interface ClosingInputErrors {
   month?: string
 }
 
-export function validateClosingInput(input: {
-  ledger: LedgerId
-  sourceMonth: string
-  method: string
-  settlementKind?: string
-  cashMode: string
-  openingCash?: number
-  openingBalances?: Partial<Record<MemberId, number>>
-  note?: string
-}): ClosingInputErrors {
+/** `memberIds` are the members shown in the month being closed (each needs a verified balance for 'manual'). */
+export function validateClosingInput(
+  input: {
+    ledger: LedgerId
+    sourceMonth: string
+    method: string
+    settlementKind?: string
+    cashMode: string
+    openingCash?: number
+    openingBalances?: Partial<Record<MemberId, number>>
+    note?: string
+  },
+  memberIds: readonly MemberId[],
+): ClosingInputErrors {
   const e: ClosingInputErrors = {}
   if (input.ledger !== 'utilities' && input.ledger !== 'bazar') e.month = 'Unknown ledger'
   if (!isValidMonth(input.sourceMonth)) e.month = 'Invalid month'
@@ -125,7 +135,7 @@ export function validateClosingInput(input: {
   if (needsCash && !isMoney(input.openingCash)) e.openingCash = 'Enter the opening cash (numbers only, up to 2 decimals)'
   if (input.method === 'manual') {
     const be: Partial<Record<MemberId, string>> = {}
-    for (const id of MEMBER_IDS) if (!isMoney(input.openingBalances?.[id])) be[id] = 'Enter an amount'
+    for (const id of memberIds) if (!isMoney(input.openingBalances?.[id])) be[id] = 'Enter an amount'
     if (Object.keys(be).length) e.openingBalances = be
   }
   if (input.note !== undefined && (typeof input.note !== 'string' || input.note.length > MAX_DESCRIPTION)) {
@@ -134,14 +144,15 @@ export function validateClosingInput(input: {
   return e
 }
 
-function isMemberMap(v: unknown): boolean {
-  if (typeof v !== 'object' || v === null) return false
-  const keys = Object.keys(v)
-  return keys.length === MEMBER_IDS.length && MEMBER_IDS.every((id) => isMoney((v as Record<string, unknown>)[id]))
+/** Per-member amounts: every key a registered member, every value money. (v1.1.1 records hold the four original ids.) */
+function isMemberMap(v: unknown, roster: Roster): boolean {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false
+  const ids = new Set(roster.map((m) => m.id))
+  return Object.entries(v).every(([k, x]) => ids.has(k) && isMoney(x))
 }
 
-/** Structural validation of a stored / imported closing record. Returns a list of problems. */
-export function validateClosing(raw: unknown): string[] {
+/** Structural validation of a stored / imported closing record against the member registry. */
+export function validateClosing(raw: unknown, roster: Roster): string[] {
   if (typeof raw !== 'object' || raw === null) return ['not an object']
   const c = raw as Partial<MonthClosing>
   const p: string[] = []
@@ -155,14 +166,14 @@ export function validateClosing(raw: unknown): string[] {
   if (c.method === 'manual' && c.cashMode !== 'set') p.push('manual opening must set cash')
   if (c.cashMode === 'set' && !isMoney(c.openingCash)) p.push('invalid opening cash')
   if (c.method === 'settled' && c.settlementKind !== 'settled' && c.settlementKind !== 'waived') p.push('invalid settlement kind')
-  if (c.method === 'manual' && !isMemberMap(c.openingBalances)) p.push('invalid opening balances')
+  if (c.method === 'manual' && !isMemberMap(c.openingBalances, roster)) p.push('invalid opening balances')
   if (c.note !== undefined && (typeof c.note !== 'string' || c.note.length > MAX_DESCRIPTION)) p.push('invalid note')
   const s = c.snapshot
   if (
     typeof s !== 'object' ||
     s === null ||
     !isMoney(s.closingCash) ||
-    !isMemberMap(s.closingBalances) ||
+    !isMemberMap(s.closingBalances, roster) ||
     !Number.isSafeInteger(s.transactionCount) ||
     !Number.isFinite(s.sourceUpdatedAt)
   ) {
@@ -170,11 +181,12 @@ export function validateClosing(raw: unknown): string[] {
   }
   if (c.adjustments !== undefined) {
     const a = c.adjustments
-    if (typeof a !== 'object' || a === null || !isMemberMap(a.members) || !isMoney(a.cash)) p.push('invalid adjustments')
+    if (typeof a !== 'object' || a === null || !isMemberMap(a.members, roster) || !isMoney(a.cash)) p.push('invalid adjustments')
     else if (p.length === 0) {
       // Must equal what the decision and snapshot imply (decided opening − closing at that time).
       const derived = closingAdjustments({ ...(c as MonthClosing), adjustments: undefined })
-      if (derived.cash !== a.cash || MEMBER_IDS.some((id) => derived.members[id] !== a.members[id])) p.push('adjustments do not match the closing decision')
+      const ids = new Set([...Object.keys(derived.members), ...Object.keys(a.members)])
+      if (derived.cash !== a.cash || [...ids].some((id) => (derived.members[id] ?? 0) !== (a.members[id] ?? 0))) p.push('adjustments do not match the closing decision')
     }
   }
   if (!Number.isFinite(c.createdAt)) p.push('invalid createdAt')

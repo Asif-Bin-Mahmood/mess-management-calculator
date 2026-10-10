@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { buildClosing, computeLedgerMonth, monthClosingStatus, nextMonthToClose } from './ledger'
 import { currentMonth } from './month'
-import { tx } from './testUtils'
+import { R4, tx } from './testUtils'
 import type { LedgerId, MonthClosing, Transaction } from './types'
 
 const close = (ledger: LedgerId, sourceMonth: string, closings: MonthClosing[] = []) =>
-  buildClosing({ ledger, sourceMonth, method: 'carry', cashMode: 'carry' }, [], closings, `${ledger}-${sourceMonth}`, 1)
+  buildClosing({ ledger, sourceMonth, method: 'carry', cashMode: 'carry' }, R4, [], closings, `${ledger}-${sourceMonth}`, 1)
 
 const sepAndOct: Transaction[] = [
   tx('bazar', 'contribution', 1000, '2026-09-02', { memberId: 'asif' }),
@@ -90,7 +90,7 @@ describe('engine cost at realistic volume', () => {
         for (let i = 0; i < 70; i++) rows.push(tx('bazar', i < 4 ? 'contribution' : 'expense', 50 + i, `${month}-10`, i < 4 ? { memberId: (['asif', 'dipu', 'yusha', 'ovi'] as const)[i] } : {}))
       }
     const t0 = performance.now()
-    for (let i = 0; i < 20; i++) computeLedgerMonth('bazar', rows, '2026-12')
+    for (let i = 0; i < 20; i++) computeLedgerMonth('bazar', R4, rows, '2026-12')
     const perCall = (performance.now() - t0) / 20
     expect(rows.length).toBe(3360)
     // Generous budget: catches accidental quadratic behaviour without being flaky.

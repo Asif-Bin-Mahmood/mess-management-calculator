@@ -22,6 +22,9 @@ const paths = {
   arrowIn: 'M12 4v14M6 12l6 6 6-6',
   arrowOut: 'M12 20V6M6 12l6-6 6 6',
   info: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 11v6M12 7.5v.01',
+  users: 'M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM2.5 20c.6-3.4 3.2-5.5 6.5-5.5s5.9 2.1 6.5 5.5M16 4.5a3.5 3.5 0 0 1 0 6.5M18 14.8c1.9.7 3.2 2.5 3.5 5.2',
+  tag: 'M3 12V4h8l10 10-8 8zM7.5 8.5v.01',
+  edit: 'M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4',
 } as const
 
 export type IconName = keyof typeof paths

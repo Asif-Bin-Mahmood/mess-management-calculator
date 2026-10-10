@@ -1,9 +1,10 @@
 /** Details sheets opened from the ledger dashboard ("View details"). Full explanations live here. */
 import type { ReactNode } from 'react'
-import type { MonthSummary } from '../../domain/ledger'
+import { displayRoster } from '../../domain/household'
+import { inRosterOrder, type MonthSummary } from '../../domain/ledger'
 import { formatTaka } from '../../domain/money'
 import { addMonths, monthLabel, shortMonthLabel } from '../../domain/month'
-import { closingMethodLabel, members, memberName } from '../../domain/types'
+import { closingMethodLabel, memberName } from '../../domain/types'
 import { reconciliationLines, type DashboardAlert } from '../../report/reportModel'
 
 const when = (ms: number) => new Date(ms).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
@@ -112,12 +113,12 @@ function CorrectionDetails({ s }: { s: MonthSummary }) {
           </tr>
         </thead>
         <tbody>
-          {members().map((m) => (
-            <tr key={m.id} className={o.memberCorrections[m.id] !== 0 ? 'changed' : ''}>
-              <th scope="row">{m.name}</th>
-              <td className="num">{formatTaka(snap.closingBalances[m.id])}</td>
-              <td className="num">{formatTaka(snap.closingBalances[m.id] + o.memberCorrections[m.id])}</td>
-              <td className="num">{formatTaka(s.members.find((x) => x.memberId === m.id)!.opening)}</td>
+          {inRosterOrder(displayRoster(), [...Object.keys(snap.closingBalances), ...Object.keys(o.memberCorrections), ...s.members.map((x) => x.memberId)]).map((id) => (
+            <tr key={id} className={(o.memberCorrections[id] ?? 0) !== 0 ? 'changed' : ''}>
+              <th scope="row">{memberName(id)}</th>
+              <td className="num">{formatTaka(snap.closingBalances[id] ?? 0)}</td>
+              <td className="num">{formatTaka((snap.closingBalances[id] ?? 0) + (o.memberCorrections[id] ?? 0))}</td>
+              <td className="num">{formatTaka(s.members.find((x) => x.memberId === id)?.opening ?? 0)}</td>
             </tr>
           ))}
           <tr className={o.cashCorrection !== 0 ? 'changed' : ''}>

@@ -1,8 +1,9 @@
+import { bySeq, sharers, type Category, type Member } from '../domain/household'
 import { analyzeCorrection, type CorrectionImpact } from '../domain/ledger'
-import { currentMonth, monthOf } from '../domain/month'
-import { DEFAULT_MEMBER_NAMES, validateMemberNames, type MemberId, type MemberNames, type Transaction } from '../domain/types'
+import { currentMonth, monthLabel, monthOf } from '../domain/month'
+import type { Transaction } from '../domain/types'
 import { normalizeTxInput, validateTxInput, type TxErrors, type TxInput } from '../domain/validate'
-import { db as defaultDb, MEMBER_NAMES_KEY, type MessDb } from './db'
+import { db as defaultDb, type MessDb } from './db'
 
 export type Mutation =
   | { kind: 'create'; input: TxInput }
@@ -29,11 +30,22 @@ function newId(): string {
   return crypto.randomUUID()
 }
 
+export interface Household {
+  members: Member[]
+  categories: Category[]
+}
+
+/** The household registry (members and Utilities categories), in display order. */
+export async function loadHousehold(database: MessDb = defaultDb): Promise<Household> {
+  const [members, categories] = await Promise.all([database.members.toArray(), database.categories.toArray()])
+  return { members: members.sort(bySeq), categories: categories.sort(bySeq) }
+}
+
 /** Pure: computes the record that results from a mutation. Throws ValidationError on bad input. */
-function build(m: Mutation, existing: Transaction | undefined, now: number): Transaction {
+function build(m: Mutation, existing: Transaction | undefined, now: number, h: Household): Transaction {
   if (m.kind === 'create' || m.kind === 'update') {
     const input = normalizeTxInput(m.input)
-    const errors = validateTxInput(input)
+    const errors = validateTxInput(input, { roster: h.members, categories: h.categories, entry: true, keepCategory: existing?.category })
     if (Object.keys(errors).length) throw new ValidationError(errors)
     if (m.kind === 'create') {
       return { ...input, id: newId(), month: monthOf(input.date), createdAt: now, updatedAt: now }
@@ -51,6 +63,9 @@ function build(m: Mutation, existing: Transaction | undefined, now: number): Tra
   }
   if (!existing) throw new Error('Transaction not found')
   if (m.kind === 'delete') return { ...existing, deletedAt: now, updatedAt: now }
+  if ((existing.type === 'expense' || existing.type === 'expenseRefund') && sharers(h.members, existing.month).length === 0) {
+    throw new ValidationError({ date: `No member shares expenses in ${monthLabel(existing.month)}. Add or restore a member for that month first.` })
+  }
   const restored = { ...existing, updatedAt: now }
   delete restored.deletedAt
   return restored
@@ -62,20 +77,21 @@ function build(m: Mutation, existing: Transaction | undefined, now: number): Tra
  */
 export async function planMutation(m: Mutation, database: MessDb = defaultDb, now = Date.now()): Promise<MutationPlan> {
   const existing = m.kind === 'create' ? undefined : await database.transactions.get(m.id)
-  const after = build(m, existing, now)
+  const h = await loadHousehold(database)
+  const after = build(m, existing, now, h)
   const ledgerTxs = await database.transactions.where('ledger').equals(after.ledger).toArray()
   const closings = await database.closings.where('ledger').equals(after.ledger).toArray()
   const nextTxs = existing ? ledgerTxs.map((t) => (t.id === after.id ? after : t)) : [...ledgerTxs, after]
   const changedMonth = existing && existing.month < after.month ? existing.month : after.month
-  const impact = analyzeCorrection(after.ledger, ledgerTxs, nextTxs, changedMonth, currentMonth(new Date(now)), closings)
+  const impact = analyzeCorrection(after.ledger, h.members, ledgerTxs, nextTxs, changedMonth, currentMonth(new Date(now)), closings)
   return { before: existing, after, impact }
 }
 
 /** Writes the mutation and its audit entry atomically. */
 export async function applyMutation(m: Mutation, database: MessDb = defaultDb, now = Date.now()): Promise<Transaction> {
-  return database.transaction('rw', database.transactions, database.audit, async () => {
+  return database.transaction('rw', [database.transactions, database.audit, database.members, database.categories], async () => {
     const existing = m.kind === 'create' ? undefined : await database.transactions.get(m.id)
-    const after = build(m, existing, now)
+    const after = build(m, existing, now, await loadHousehold(database))
     await database.transactions.put(after)
     await database.audit.add({ at: now, action: m.kind, txId: after.id, ledger: after.ledger, before: existing, after })
     return after
@@ -99,27 +115,4 @@ export async function requestPersistentStorage(): Promise<boolean | null> {
   } catch {
     return null
   }
-}
-
-/* ───────────── Member display names ───────────── */
-
-/** Stored display names, or the neutral defaults for a fresh installation. */
-export async function loadMemberNames(database: MessDb = defaultDb): Promise<MemberNames> {
-  const v = (await database.meta.get(MEMBER_NAMES_KEY))?.value as Partial<MemberNames> | undefined
-  return { ...DEFAULT_MEMBER_NAMES, ...(v ?? {}) }
-}
-
-/**
- * Renames members. Only display names change: transactions, balances and closings refer to the
- * permanent member ids and are not touched. Recorded in the audit trail.
- */
-export async function saveMemberNames(raw: Partial<Record<MemberId, string>>, database: MessDb = defaultDb, now = Date.now()): Promise<MemberNames> {
-  const { names, errors } = validateMemberNames(raw)
-  if (Object.keys(errors).length) throw new Error(Object.values(errors)[0])
-  return database.transaction('rw', database.meta, database.audit, async () => {
-    const before = await loadMemberNames(database)
-    await database.meta.put({ key: MEMBER_NAMES_KEY, value: names })
-    await database.audit.add({ at: now, action: 'rename-members', txId: 'members', note: JSON.stringify({ before, after: names }) })
-    return names
-  })
 }

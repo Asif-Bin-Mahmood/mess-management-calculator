@@ -1,5 +1,6 @@
 import { createContext, useContext, type ReactNode } from 'react'
-import type { MemberNames, MonthClosing, Transaction } from '../domain/types'
+import type { Category, Member } from '../domain/household'
+import type { MonthClosing, Transaction } from '../domain/types'
 
 export interface ConfirmOptions {
   title: string
@@ -27,10 +28,12 @@ export type ToastFn = (t: Omit<Toast, 'id'>) => void
 export interface AppState {
   txs: Transaction[] | undefined
   closings: MonthClosing[]
-  /** Current member display names (ids never change). */
-  memberNames: MemberNames
-  /** False until names are saved on this device (fresh installation). */
-  memberNamesSet: boolean
+  /** Every member ever registered (current and former), in roster order. Accounting uses it as the roster. */
+  members: Member[]
+  /** Utilities categories (active and archived), in display order. */
+  categories: Category[]
+  /** True on a fresh installation until the household is set up. */
+  needsSetup: boolean
   month: string
   setMonth: (m: string) => void
   minMonth: string

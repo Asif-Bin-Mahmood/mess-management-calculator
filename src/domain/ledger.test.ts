@@ -6,7 +6,7 @@ import {
   computeLedgerMonth,
   type MonthSummary,
 } from './ledger'
-import { tx } from './testUtils'
+import { IDS4, R4, tx } from './testUtils'
 import type { MemberId } from './types'
 
 const bal = (s: MonthSummary, id: MemberId) => s.members.find((m) => m.memberId === id)!
@@ -19,13 +19,13 @@ function expectReconciled(s: MonthSummary) {
 
 describe('allocateShares', () => {
   it('splits evenly divisible totals equally', () => {
-    expect(allocateShares(400_00, '2026-01')).toEqual({ asif: 100_00, dipu: 100_00, yusha: 100_00, ovi: 100_00 })
+    expect(allocateShares(400_00, '2026-01', IDS4)).toEqual({ asif: 100_00, dipu: 100_00, yusha: 100_00, ovi: 100_00 })
   })
 
   it('always sums exactly to the total, including remainders and negatives', () => {
     for (const total of [0, 1, 2, 3, 5, 99, 1001, 123457, -1, -2, -3, -101]) {
       for (const month of ['2026-01', '2026-02', '2026-03', '2026-04']) {
-        const s = allocateShares(total, month)
+        const s = allocateShares(total, month, IDS4)
         const values = Object.values(s)
         expect(values.reduce((a, b) => a + b, 0)).toBe(total)
         expect(Math.max(...values) - Math.min(...values)).toBeLessThanOrEqual(1)
@@ -35,14 +35,14 @@ describe('allocateShares', () => {
 
   it('rotates the leftover poisha deterministically by month', () => {
     // monthIndex(2026-01) = 2026*12 = 24312 → 24312 % 4 = 0 → starts at Asif
-    expect(allocateShares(1, '2026-01')).toEqual({ asif: 1, dipu: 0, yusha: 0, ovi: 0 })
-    expect(allocateShares(1, '2026-02')).toEqual({ asif: 0, dipu: 1, yusha: 0, ovi: 0 })
-    expect(allocateShares(2, '2026-04')).toEqual({ asif: 1, dipu: 0, yusha: 0, ovi: 1 })
-    expect(allocateShares(3, '2026-03')).toEqual({ asif: 1, dipu: 0, yusha: 1, ovi: 1 })
+    expect(allocateShares(1, '2026-01', IDS4)).toEqual({ asif: 1, dipu: 0, yusha: 0, ovi: 0 })
+    expect(allocateShares(1, '2026-02', IDS4)).toEqual({ asif: 0, dipu: 1, yusha: 0, ovi: 0 })
+    expect(allocateShares(2, '2026-04', IDS4)).toEqual({ asif: 1, dipu: 0, yusha: 0, ovi: 1 })
+    expect(allocateShares(3, '2026-03', IDS4)).toEqual({ asif: 1, dipu: 0, yusha: 1, ovi: 1 })
   })
 
   it('rejects fractional poisha', () => {
-    expect(() => allocateShares(1.5, '2026-01')).toThrow()
+    expect(() => allocateShares(1.5, '2026-01', IDS4)).toThrow()
   })
 })
 
@@ -55,7 +55,7 @@ describe('computeLedgerMonth — single month formulas', () => {
       tx('bazar', 'expense', 1500, '2026-05-04'),
       tx('bazar', 'expense', 2500.5, '2026-05-10'),
     ]
-    const s = computeLedgerMonth('bazar', txs, '2026-05')
+    const s = computeLedgerMonth('bazar', R4, txs, '2026-05')
     expect(s.totalCollected).toBe(6000_00)
     expect(s.totalSpent).toBe(4000_50)
     expect(s.remainingCash).toBe(1999_50)
@@ -73,7 +73,7 @@ describe('computeLedgerMonth — single month formulas', () => {
   })
 
   it('handles a month with contributions but zero expenses', () => {
-    const s = computeLedgerMonth('utilities', [tx('utilities', 'contribution', 500, '2026-06-02', { memberId: 'ovi' })], '2026-06')
+    const s = computeLedgerMonth('utilities', R4, [tx('utilities', 'contribution', 500, '2026-06-02', { memberId: 'ovi' })], '2026-06')
     expect(s.totalSpent).toBe(0)
     expect(s.averagePerPerson).toBe(0)
     expect(bal(s, 'ovi').closing).toBe(500_00)
@@ -86,7 +86,7 @@ describe('computeLedgerMonth — single month formulas', () => {
       tx('bazar', 'contribution', 100, '2026-06-01', { memberId: 'asif' }),
       tx('bazar', 'expense', 1000, '2026-06-02'),
     ]
-    const s = computeLedgerMonth('bazar', txs, '2026-06')
+    const s = computeLedgerMonth('bazar', R4, txs, '2026-06')
     expect(s.remainingCash).toBe(-900_00)
     expect(bal(s, 'asif').closing).toBe(-150_00)
     expect(bal(s, 'dipu').closing).toBe(-250_00)
@@ -102,7 +102,7 @@ describe('computeLedgerMonth — single month formulas', () => {
       tx('utilities', 'expenseRefund', 400, '2026-07-08', { category: 'current' }),
       tx('utilities', 'expense', 1000, '2026-07-09', { category: 'wifi' }),
     ]
-    const s = computeLedgerMonth('utilities', txs, '2026-07')
+    const s = computeLedgerMonth('utilities', R4, txs, '2026-07')
     expect(s.contributionsGross).toBe(2000_00)
     expect(s.memberRefunds).toBe(200_00)
     expect(s.totalCollected).toBe(1800_00)
@@ -110,7 +110,8 @@ describe('computeLedgerMonth — single month formulas', () => {
     expect(s.expenseRefunds).toBe(400_00)
     expect(s.totalSpent).toBe(1800_00)
     expect(s.remainingCash).toBe(0)
-    expect(s.categoryTotals).toEqual({ service: 0, current: 800_00, gas: 0, wifi: 1000_00, others: 0 })
+    // Only categories with entries this month are listed; a category without entries counts as ৳0.
+    expect(s.categoryTotals).toEqual({ current: 800_00, wifi: 1000_00 })
     expect(bal(s, 'dipu').netContribution).toBe(800_00)
     expect(bal(s, 'dipu').closing).toBe(800_00 - 450_00)
     expectReconciled(s)
@@ -121,13 +122,13 @@ describe('computeLedgerMonth — single month formulas', () => {
       tx('bazar', 'expense', 1000, '2026-06-02', { deletedAt: 1 }),
       tx('bazar', 'contribution', 50, '2026-06-02', { memberId: 'asif' }),
     ]
-    const s = computeLedgerMonth('bazar', txs, '2026-06')
+    const s = computeLedgerMonth('bazar', R4, txs, '2026-06')
     expect(s.totalSpent).toBe(0)
     expect(s.transactionCount).toBe(1)
   })
 
   it('returns an empty, balanced month when there are no transactions', () => {
-    const s = computeLedgerMonth('bazar', [], '2026-06')
+    const s = computeLedgerMonth('bazar', R4, [], '2026-06')
     expect(s.remainingCash).toBe(0)
     expect(s.members.every((m) => m.closing === 0)).toBe(true)
     expectReconciled(s)
@@ -142,8 +143,8 @@ describe('ledger isolation', () => {
       tx('bazar', 'contribution', 300, '2026-05-01', { memberId: 'asif' }),
       tx('bazar', 'expense', 800, '2026-05-03'),
     ]
-    const u = computeLedgerMonth('utilities', txs, '2026-05')
-    const b = computeLedgerMonth('bazar', txs, '2026-05')
+    const u = computeLedgerMonth('utilities', R4, txs, '2026-05')
+    const b = computeLedgerMonth('bazar', R4, txs, '2026-05')
     expect(u.totalCollected).toBe(1000_00)
     expect(u.totalSpent).toBe(400_00)
     expect(b.totalCollected).toBe(300_00)
@@ -152,8 +153,8 @@ describe('ledger isolation', () => {
     expect(bal(b, 'asif').closing).toBe(100_00)
 
     // Carry-forward is per ledger too.
-    const u2 = computeLedgerMonth('utilities', txs, '2026-06')
-    const b2 = computeLedgerMonth('bazar', txs, '2026-06')
+    const u2 = computeLedgerMonth('utilities', R4, txs, '2026-06')
+    const b2 = computeLedgerMonth('bazar', R4, txs, '2026-06')
     expect(u2.openingCash).toBe(600_00)
     expect(b2.openingCash).toBe(-500_00)
   })
@@ -163,8 +164,8 @@ describe('ledger isolation', () => {
       tx('utilities', 'contribution', 100, '2026-01-01', { memberId: 'ovi' }),
       tx('bazar', 'contribution', 100, '2026-04-01', { memberId: 'ovi' }),
     ]
-    expect(computeHistory('utilities', txs, '2026-04').map((s) => s.month)).toEqual(['2026-01', '2026-02', '2026-03', '2026-04'])
-    expect(computeHistory('bazar', txs, '2026-04').map((s) => s.month)).toEqual(['2026-04'])
+    expect(computeHistory('utilities', R4, txs, '2026-04').map((s) => s.month)).toEqual(['2026-01', '2026-02', '2026-03', '2026-04'])
+    expect(computeHistory('bazar', R4, txs, '2026-04').map((s) => s.month)).toEqual(['2026-04'])
   })
 })
 
@@ -179,7 +180,7 @@ describe('carry-forward', () => {
   ]
 
   it('carries closing balances and cash into the next month without re-counting transactions', () => {
-    const [jan, feb, mar] = computeHistory('bazar', txs, '2026-03')
+    const [jan, feb, mar] = computeHistory('bazar', R4, txs, '2026-03')
     expectReconciled(jan)
     expect(jan.remainingCash).toBe(1999_97)
 
@@ -218,7 +219,7 @@ describe('carry-forward', () => {
       else if (k < 0.95) many.push(tx('bazar', 'expense', amount, date))
       else many.push(tx('bazar', 'expenseRefund', amount / 10, date))
     }
-    const history = computeHistory('bazar', many, '2026-03')
+    const history = computeHistory('bazar', R4, many, '2026-03')
     for (const s of history) expectReconciled(s)
   })
 })
@@ -232,12 +233,12 @@ describe('analyzeCorrection', () => {
 
   it('returns null for changes in the latest month', () => {
     const after = [...base, tx('utilities', 'expense', 100, '2026-10-02', { category: 'others' })]
-    expect(analyzeCorrection('utilities', base, after, '2026-10', '2026-10')).toBeNull()
+    expect(analyzeCorrection('utilities', R4, base, after, '2026-10', '2026-10')).toBeNull()
   })
 
   it('describes the ripple into later months for historical corrections', () => {
     const corrected = base.map((t, i) => (i === 1 ? { ...t, amount: 800_00 } : t))
-    const impact = analyzeCorrection('utilities', base, corrected, '2026-08', '2026-10')!
+    const impact = analyzeCorrection('utilities', R4, base, corrected, '2026-08', '2026-10')!
     expect(impact.laterMonths).toEqual(['2026-09', '2026-10'])
     expect(impact.cashBefore).toBe(200_00)
     expect(impact.cashAfter).toBe(-200_00)
@@ -248,7 +249,7 @@ describe('analyzeCorrection', () => {
 
   it('extends the horizon to later transaction months beyond the current month', () => {
     const later = [...base, tx('utilities', 'expense', 100, '2026-12-01', { category: 'others' })]
-    const impact = analyzeCorrection('utilities', later, later.slice(1), '2026-08', '2026-10')!
+    const impact = analyzeCorrection('utilities', R4, later, later.slice(1), '2026-08', '2026-10')!
     expect(impact.horizon).toBe('2026-12')
   })
 })

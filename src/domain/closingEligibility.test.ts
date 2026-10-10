@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { analyzeUndo, buildClosing, canClose } from './ledger'
 import { currentMonth } from './month'
-import { tx } from './testUtils'
+import { R4, tx } from './testUtils'
 import type { LedgerId, MonthClosing } from './types'
 
 const close = (ledger: LedgerId, sourceMonth: string, closings: MonthClosing[] = []) =>
-  buildClosing({ ledger, sourceMonth, method: 'carry', cashMode: 'carry' }, [], closings, `${ledger}-${sourceMonth}`, 1)
+  buildClosing({ ledger, sourceMonth, method: 'carry', cashMode: 'carry' }, R4, [], closings, `${ledger}-${sourceMonth}`, 1)
 
 describe('a month can be closed only after it has ended (device local date)', () => {
   it('last minute of the month vs first minute of the next', () => {
@@ -59,10 +59,10 @@ describe('a month can be closed only after it has ended (device local date)', ()
     const txs = [tx('bazar', 'expense', 100, '2026-08-02')]
     const aug = close('bazar', '2026-08')
     const sep = close('bazar', '2026-09', [aug])
-    expect(analyzeUndo(aug, txs, [aug, sep], '2026-11').blockedBy.map((c) => c.sourceMonth)).toEqual(['2026-09'])
-    expect(analyzeUndo(sep, txs, [aug, sep], '2026-11').blockedBy).toEqual([])
+    expect(analyzeUndo(aug, R4, txs, [aug, sep], '2026-11').blockedBy.map((c) => c.sourceMonth)).toEqual(['2026-09'])
+    expect(analyzeUndo(sep, R4, txs, [aug, sep], '2026-11').blockedBy).toEqual([])
     // A later closing in the other ledger does not block.
     const utilSep = close('utilities', '2026-09')
-    expect(analyzeUndo(aug, txs, [aug, utilSep], '2026-11').blockedBy).toEqual([])
+    expect(analyzeUndo(aug, R4, txs, [aug, utilSep], '2026-11').blockedBy).toEqual([])
   })
 })

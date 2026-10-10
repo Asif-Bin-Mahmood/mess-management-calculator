@@ -4,6 +4,8 @@ import { computeLedgerMonth } from '../domain/ledger'
 import { MessDb } from './db'
 import { checkBackup, createBackup, restoreBackup } from './backup'
 import { applyMutation, planMutation, ValidationError } from './repo'
+import { R4 } from '../domain/testUtils'
+import { seedLegacyHousehold } from './testDb'
 
 let db: MessDb
 let n = 0
@@ -13,6 +15,7 @@ beforeEach(async () => {
   n += 1
   db = new MessDb(`test-${n}`)
   await db.open()
+  await seedLegacyHousehold(db)
 })
 
 afterEach(async () => {
@@ -59,12 +62,12 @@ describe('persistence', () => {
     await applyMutation({ kind: 'delete', id: t.id }, db, NOW + 1)
     let all = await db.transactions.toArray()
     expect(all[0].deletedAt).toBe(NOW + 1)
-    expect(computeLedgerMonth('bazar', all, '2026-10').totalSpent).toBe(0)
+    expect(computeLedgerMonth('bazar', R4, all, '2026-10').totalSpent).toBe(0)
 
     await applyMutation({ kind: 'restore', id: t.id }, db, NOW + 2)
     all = await db.transactions.toArray()
     expect(all[0].deletedAt).toBeUndefined()
-    expect(computeLedgerMonth('bazar', all, '2026-10').totalSpent).toBe(300_00)
+    expect(computeLedgerMonth('bazar', R4, all, '2026-10').totalSpent).toBe(300_00)
 
     const audit = await db.audit.toArray()
     expect(audit.map((a) => a.action)).toEqual(['create', 'delete', 'restore'])
@@ -129,6 +132,7 @@ describe('backup and restore', () => {
 
     const other = new MessDb(`restore-${n}`)
     await other.open()
+    await seedLegacyHousehold(other)
     await applyMutation(bazarExpense(9999, '2026-01-01'), other, NOW) // will be replaced
     await restoreBackup(check.data, other, NOW + 10)
     const restored = await other.transactions.toArray()

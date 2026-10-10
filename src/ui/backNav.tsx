@@ -21,6 +21,7 @@ export function backTarget(route: readonly string[]): string | null {
   if (!a) return null
   if (isLedger(a) && b) return a // utilities/new/…, bazar/edit/…, bazar/close/…, utilities/report → same ledger
   if (a === 'reports') return isLedger(b) ? b! : ''
+  if (a === 'settings' && b) return 'settings' // Members, Utilities categories → Backup & settings
   return '' // top-level tabs (Utilities, Bazar, Backup) → Home
 }
 

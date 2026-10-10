@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { formatTaka, parseTaka, poishaToInput } from './money'
 import { addMonths, dayLabel, isValidDate, monthLabel, monthRange } from './month'
 import { validateTransaction, validateTxInput } from './validate'
-import { tx } from './testUtils'
+import { CTX4, tx } from './testUtils'
 
 describe('parseTaka', () => {
   it.each([
@@ -60,26 +60,26 @@ describe('months', () => {
 
 describe('validation', () => {
   it('requires a member for contributions and a category for utility expenses', () => {
-    expect(validateTxInput({ ledger: 'bazar', type: 'contribution', amount: 100, date: '2026-01-01' }).memberId).toBeTruthy()
-    expect(validateTxInput({ ledger: 'utilities', type: 'expense', amount: 100, date: '2026-01-01' }).category).toBeTruthy()
-    expect(validateTxInput({ ledger: 'utilities', type: 'expense', amount: 100, date: '2026-01-01', category: 'gas' })).toEqual({})
+    expect(validateTxInput({ ledger: 'bazar', type: 'contribution', amount: 100, date: '2026-01-01' }, CTX4).memberId).toBeTruthy()
+    expect(validateTxInput({ ledger: 'utilities', type: 'expense', amount: 100, date: '2026-01-01' }, CTX4).category).toBeTruthy()
+    expect(validateTxInput({ ledger: 'utilities', type: 'expense', amount: 100, date: '2026-01-01', category: 'gas' }, CTX4)).toEqual({})
   })
 
   it('rejects categories on Bazar expenses', () => {
-    expect(validateTxInput({ ledger: 'bazar', type: 'expense', amount: 100, date: '2026-01-01', category: 'gas' }).category).toBeTruthy()
+    expect(validateTxInput({ ledger: 'bazar', type: 'expense', amount: 100, date: '2026-01-01', category: 'gas' }, CTX4).category).toBeTruthy()
   })
 
   it('rejects zero, negative and fractional amounts', () => {
     for (const amount of [0, -1, 1.5, Number.NaN]) {
-      expect(validateTxInput({ ledger: 'bazar', type: 'expense', amount, date: '2026-01-01' }).amount).toBeTruthy()
+      expect(validateTxInput({ ledger: 'bazar', type: 'expense', amount, date: '2026-01-01' }, CTX4).amount).toBeTruthy()
     }
   })
 
   it('validates stored records strictly', () => {
     const ok = tx('bazar', 'expense', 10, '2026-01-01')
-    expect(validateTransaction(ok)).toEqual([])
-    expect(validateTransaction({ ...ok, month: '2026-02' })).toContain('month does not match date')
-    expect(validateTransaction({ ...ok, extra: 1 })).toContain('unexpected field "extra"')
-    expect(validateTransaction(null)).toEqual(['not an object'])
+    expect(validateTransaction(ok, CTX4)).toEqual([])
+    expect(validateTransaction({ ...ok, month: '2026-02' }, CTX4)).toContain('month does not match date')
+    expect(validateTransaction({ ...ok, extra: 1 }, CTX4)).toContain('unexpected field "extra"')
+    expect(validateTransaction(null, CTX4)).toEqual(['not an object'])
   })
 })

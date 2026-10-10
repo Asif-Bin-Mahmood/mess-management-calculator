@@ -1,26 +1,16 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { ValidationError } from '../../db/repo'
 import { formatTaka, parseTaka, poishaToInput } from '../../domain/money'
 import { currentMonth, dayLabel, isValidDate, lastDayOfMonth, monthLabel, monthOf, toDateKey } from '../../domain/month'
-import {
-  ledgerName,
-  members,
-  memberName,
-  txTypeLabel,
-  UTILITY_CATEGORIES,
-  type LedgerId,
-  type MemberId,
-  type Transaction,
-  type TxType,
-  type UtilityCategory,
-} from '../../domain/types'
+import { memberName, sharers, type CategoryId } from '../../domain/household'
+import { ledgerName, txTypeLabel, type LedgerId, type MemberId, type Transaction, type TxType } from '../../domain/types'
 import { MAX_DESCRIPTION, type TxErrors, type TxInput } from '../../domain/validate'
-import { checkMemberReturn, type MemberReturnCheck } from '../../domain/ledger'
+import { checkMemberReturn, computeLedgerMonth, inRosterOrder, type MemberReturnCheck } from '../../domain/ledger'
 import { useApp } from '../context'
 import { useMutate } from '../useMutate'
-import { EmptyState, TopBar } from '../common'
+import { Avatar, EmptyState, TopBar } from '../common'
 import { useToast, type ConfirmOptions } from '../context'
-import { goBack } from '../hooks'
+import { goBack, navigate } from '../hooks'
 import { useLeaveGuard } from '../backNav'
 import { Icon } from '../icons'
 
@@ -53,14 +43,14 @@ export function TxForm({ ledger, kind: initialKind, editId }: { ledger: LedgerId
 function FormBody({ ledger, existing, initialKind, month }: { ledger: LedgerId; existing?: Transaction; initialKind?: Kind; month: string }) {
   const mutate = useMutate()
   const toast = useToast()
-  const { txs, closings } = useApp()
+  const { txs, closings, members, categories } = useApp()
   const amountRef = useRef<HTMLInputElement>(null)
 
   const [kind, setKind] = useState<Kind>(existing ? (existing.type === 'contribution' || existing.type === 'memberRefund' ? 'in' : 'out') : initialKind!)
   const [refund, setRefund] = useState(existing ? existing.type === 'memberRefund' || existing.type === 'expenseRefund' : false)
   const [amount, setAmount] = useState(existing ? poishaToInput(existing.amount) : '')
   const [memberId, setMemberId] = useState<MemberId | undefined>(existing?.memberId)
-  const [category, setCategory] = useState<UtilityCategory | undefined>(existing?.category)
+  const [category, setCategory] = useState<CategoryId | undefined>(existing?.category)
   const [date, setDate] = useState(existing?.date ?? defaultDate(month))
   const [description, setDescription] = useState(existing?.description ?? '')
   const [errors, setErrors] = useState<TxErrors>({})
@@ -78,6 +68,19 @@ function FormBody({ ledger, existing, initialKind, month }: { ledger: LedgerId; 
   const type: TxType = kind === 'in' ? (refund ? 'memberRefund' : 'contribution') : refund ? 'expenseRefund' : 'expense'
   const needsCategory = kind === 'out' && ledger === 'utilities'
   const parsed = parseTaka(amount)
+  const entryMonth = isValidDate(date) ? monthOf(date) : month
+
+  // Who can be chosen: members sharing the entry's month, plus anyone shown in that month of this ledger
+  // (e.g. a former member who still has a balance to settle), plus the member an edited entry already has.
+  const existingMember = existing?.memberId
+  const memberChoices = useMemo(() => {
+    const sharing = new Set(sharers(members, entryMonth).map((m) => m.id))
+    const shown = computeLedgerMonth(ledger, members, (txs ?? []).filter((t) => t.ledger === ledger), entryMonth, closings).members.map((m) => m.memberId)
+    const ids = inRosterOrder(members, [...sharing, ...shown, ...(existingMember ? [existingMember] : [])])
+    return ids.map((id) => ({ id, name: memberName(id), sharing: sharing.has(id) }))
+  }, [members, entryMonth, ledger, txs, closings, existingMember])
+  const nobodyShares = sharers(members, entryMonth).length === 0
+  const categoryChoices = categories.filter((c) => c.archivedAt === undefined || c.id === existing?.category)
 
   const title = existing ? `Edit ${txTypeLabel(existing.type).toLowerCase()}` : kind === 'in' ? 'New contribution' : 'New expense'
 
@@ -93,7 +96,8 @@ function FormBody({ ledger, existing, initialKind, month }: { ledger: LedgerId; 
       setErrors(local)
       return
     }
-    const ask = type === 'memberRefund' && memberId ? returnWarning(checkMemberReturn(ledger, txs ?? [], closings, { memberId, amount: parsed!, month: monthOf(date) }, existing?.id)) : undefined
+    const ask =
+      type === 'memberRefund' && memberId ? returnWarning(checkMemberReturn(ledger, members, txs ?? [], closings, { memberId, amount: parsed!, month: monthOf(date) }, existing?.id)) : undefined
     setBusy(true)
     try {
       const saved = await mutate(existing ? { kind: 'update', id: existing.id, input } : { kind: 'create', input }, {
@@ -203,31 +207,39 @@ function FormBody({ ledger, existing, initialKind, month }: { ledger: LedgerId; 
         {kind === 'in' ? (
           <fieldset className="field">
             <legend className="field-label">{refund ? 'Returned to' : 'Paid by'}</legend>
-            <div className="choice-grid choice-4" aria-describedby={errors.memberId ? 'err-memberId' : undefined}>
-              {members().map((m) => (
-                <label key={m.id} className={`choice ${memberId === m.id ? 'on' : ''}`}>
-                  <input type="radio" name="member" value={m.id} checked={memberId === m.id} onChange={() => setMemberId(m.id)} />
-                  <span className={`avatar avatar-${m.id}`} aria-hidden="true">
-                    {m.name[0]}
-                  </span>
-                  {m.name}
-                </label>
-              ))}
-            </div>
+            {memberChoices.length === 0 ? (
+              <EmptyHint text={`Nobody is a member in ${monthLabel(entryMonth)}.`} action="Manage members" to="settings/members" />
+            ) : (
+              <div className="choice-grid choice-members" aria-describedby={errors.memberId ? 'err-memberId' : undefined}>
+                {memberChoices.map((m) => (
+                  <label key={m.id} className={`choice ${memberId === m.id ? 'on' : ''}`}>
+                    <input type="radio" name="member" value={m.id} checked={memberId === m.id} onChange={() => setMemberId(m.id)} />
+                    <Avatar id={m.id} />
+                    <span className="choice-name">{m.name}</span>
+                    {!m.sharing && <span className="choice-note">left</span>}
+                  </label>
+                ))}
+              </div>
+            )}
             {err('memberId')}
           </fieldset>
         ) : (
           needsCategory && (
             <fieldset className="field">
               <legend className="field-label">Category</legend>
-              <div className="choice-grid" aria-describedby={errors.category ? 'err-category' : undefined}>
-                {UTILITY_CATEGORIES.map((c) => (
-                  <label key={c.id} className={`choice ${category === c.id ? 'on' : ''}`}>
-                    <input type="radio" name="category" value={c.id} checked={category === c.id} onChange={() => setCategory(c.id)} />
-                    {c.name}
-                  </label>
-                ))}
-              </div>
+              {categoryChoices.length === 0 ? (
+                <EmptyHint text="There are no Utilities categories yet." action="Add categories" to="settings/categories" />
+              ) : (
+                <div className="choice-grid" aria-describedby={errors.category ? 'err-category' : undefined}>
+                  {categoryChoices.map((c) => (
+                    <label key={c.id} className={`choice ${category === c.id ? 'on' : ''}`}>
+                      <input type="radio" name="category" value={c.id} checked={category === c.id} onChange={() => setCategory(c.id)} />
+                      {c.name}
+                      {c.archivedAt !== undefined && <span className="choice-note">archived</span>}
+                    </label>
+                  ))}
+                </div>
+              )}
               {err('category')}
             </fieldset>
           )
@@ -247,6 +259,9 @@ function FormBody({ ledger, existing, initialKind, month }: { ledger: LedgerId; 
           <span className="field-hint" id="date-hint">
             {isValidDate(date) ? `Counts toward ${monthLabel(monthOf(date))}` : ''}
           </span>
+          {kind === 'out' && isValidDate(date) && nobodyShares && !errors.date && (
+            <p className="field-error">Nobody shares expenses in {monthLabel(entryMonth)}. Add or restore a member for that month first.</p>
+          )}
           {err('date')}
         </label>
 
@@ -342,4 +357,15 @@ function returnWarning(c: MemberReturnCheck): ConfirmOptions | undefined {
     ),
     confirmLabel: 'Record return anyway',
   }
+}
+
+function EmptyHint({ text, action, to }: { text: string; action: string; to: string }) {
+  return (
+    <div className="empty-hint">
+      <p>{text}</p>
+      <button type="button" className="btn btn-tonal" onClick={() => navigate(to)}>
+        {action}
+      </button>
+    </div>
+  )
 }

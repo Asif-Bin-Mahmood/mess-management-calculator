@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react'
 import { computeLedgerMonth, type MonthSummary } from '../../domain/ledger'
 import { formatTaka } from '../../domain/money'
 import { dayLabel, monthLabel } from '../../domain/month'
-import { categoryName, ledgerName, memberName, UTILITY_CATEGORIES, type LedgerId, type Transaction, type UtilityCategory } from '../../domain/types'
+import type { Category, CategoryId } from '../../domain/household'
+import { categoryName, ledgerName, memberName, type LedgerId, type Transaction } from '../../domain/types'
 import { balanceStatus, dashboardAlerts, txCashEffect, txTitle } from '../../report/reportModel'
 import { useApp, useConfirm, type ConfirmOptions } from '../context'
 import { Avatar, BalanceTag, EmptyState, Money, MonthSwitcher, TopBar } from '../common'
@@ -11,11 +12,12 @@ import { DetailsBody, type DetailsKind } from './LedgerDetails'
 import { MonthStatusRow } from './MonthClosing'
 import { Icon } from '../icons'
 
-type Filter = 'all' | 'in' | 'out' | UtilityCategory
+/** History filter; a category filter is `cat:<category id>`. */
+type Filter = 'all' | 'in' | 'out' | `cat:${CategoryId}`
 
 export function Ledger({ ledger }: { ledger: LedgerId }) {
-  const { txs, closings, month, setMonth, minMonth, maxMonth } = useApp()
-  const s = useMemo(() => computeLedgerMonth(ledger, txs ?? [], month, closings), [ledger, txs, month, closings])
+  const { txs, closings, month, setMonth, minMonth, maxMonth, members, categories } = useApp()
+  const s = useMemo(() => computeLedgerMonth(ledger, members, txs ?? [], month, closings), [ledger, members, txs, month, closings])
   const monthTxs = useMemo(
     () =>
       (txs ?? [])
@@ -87,12 +89,12 @@ export function Ledger({ ledger }: { ledger: LedgerId }) {
       <div className="stat-grid">
         <Stat label="Total collected" value={s.totalCollected} icon="arrowIn" />
         <Stat label="Total spent" value={s.totalSpent} icon="arrowOut" />
-        <Stat label="Average expense per person" value={s.averagePerPerson} icon="info" wide />
+        <Stat label={`Share per sharing member (${s.sharers.length})`} value={s.averagePerPerson} icon="info" wide />
       </div>
 
       <Members s={s} />
 
-      {s.categoryTotals && <Categories totals={s.categoryTotals} total={s.totalSpent} filter={filter} setFilter={setFilter} />}
+      {s.categoryTotals && <Categories totals={s.categoryTotals} categories={categories} total={s.totalSpent} filter={filter} setFilter={setFilter} />}
 
       <History key={`${ledger}-${month}`} ledger={ledger} month={month} txs={monthTxs} filter={filter} setFilter={setFilter} />
 
@@ -126,8 +128,15 @@ function Members({ s }: { s: MonthSummary }) {
         <h2 id="members-h" className="card-title">
           Members
         </h2>
-        <span className="card-hint">Share {formatTaka(s.averagePerPerson)} each</span>
+        <span className="card-hint">{s.sharers.length ? `Share ${formatTaka(s.averagePerPerson)} each` : 'Nobody shares this month'}</span>
       </div>
+      {s.members.length === 0 && (
+        <EmptyState icon="info" title="No members this month">
+          <button type="button" className="btn btn-tonal" onClick={() => navigate('settings/members')}>
+            Manage members
+          </button>
+        </EmptyState>
+      )}
       <ul className="member-list">
         {s.members.map((m) => (
           <li key={m.memberId}>
@@ -138,6 +147,7 @@ function Members({ s }: { s: MonthSummary }) {
                   <span className="member-name">{memberName(m.memberId)}</span>
                   <span className="member-sub">
                     Paid <Money value={m.netContribution} />
+                    {!s.sharers.includes(m.memberId) && <> · left, not sharing</>}
                   </span>
                 </span>
                 <BalanceTag value={m.closing} />
@@ -186,16 +196,42 @@ function Members({ s }: { s: MonthSummary }) {
 
 function Categories({
   totals,
+  categories,
   total,
   filter,
   setFilter,
 }: {
-  totals: Record<UtilityCategory, number>
+  totals: Record<CategoryId, number>
+  categories: Category[]
   total: number
   filter: Filter
   setFilter: (f: Filter) => void
 }) {
+  // Active categories, plus archived (or unknown) ones that have entries this month.
+  const known = new Set(categories.map((c) => c.id))
+  const rows = [
+    ...categories.filter((c) => c.archivedAt === undefined || c.id in totals).map((c) => ({ id: c.id, name: c.name })),
+    ...Object.keys(totals)
+      .filter((id) => !known.has(id))
+      .map((id) => ({ id, name: categoryName(id) })),
+  ]
   const max = Math.max(1, ...Object.values(totals))
+  if (rows.length === 0) {
+    return (
+      <section className="card" aria-labelledby="cat-h">
+        <div className="card-head">
+          <h2 id="cat-h" className="card-title">
+            By category
+          </h2>
+        </div>
+        <EmptyState icon="info" title="No Utilities categories yet">
+          <button type="button" className="btn btn-tonal" onClick={() => navigate('settings/categories')}>
+            Add categories
+          </button>
+        </EmptyState>
+      </section>
+    )
+  }
   return (
     <section className="card" aria-labelledby="cat-h">
       <div className="card-head">
@@ -207,16 +243,17 @@ function Categories({
         </span>
       </div>
       <ul className="cat-list">
-        {UTILITY_CATEGORIES.map((c) => {
-          const v = totals[c.id]
-          const active = filter === c.id
+        {rows.map((c) => {
+          const v = totals[c.id] ?? 0
+          const key: Filter = `cat:${c.id}`
+          const active = filter === key
           return (
             <li key={c.id}>
               <button
                 type="button"
                 className={`cat ${active ? 'active' : ''}`}
                 aria-pressed={active}
-                onClick={() => setFilter(active ? 'all' : c.id)}
+                onClick={() => setFilter(active ? 'all' : key)}
               >
                 <span className="cat-row">
                   <span className="cat-name">{c.name}</span>
@@ -251,7 +288,7 @@ function History({
     if (filter === 'all') return true
     if (filter === 'in') return t.type === 'contribution' || t.type === 'memberRefund'
     if (filter === 'out') return t.type === 'expense' || t.type === 'expenseRefund'
-    return t.category === filter
+    return `cat:${t.category}` === filter
   })
   // Long months render the latest entries first; the rest on request (keeps month switching fast).
   const [all, setAll] = useState(false)
@@ -267,7 +304,7 @@ function History({
     ['in', 'Contributions'],
     ['out', 'Expenses'],
   ]
-  if (filter !== 'all' && filter !== 'in' && filter !== 'out') chips.push([filter, categoryName(filter)])
+  if (filter.startsWith('cat:')) chips.push([filter, categoryName(filter.slice(4))])
 
   return (
     <section className="card" aria-labelledby="hist-h">

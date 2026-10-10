@@ -2,8 +2,9 @@ import { useRef, type ReactNode } from 'react'
 import type { ClosingEffectChange, CorrectionImpact } from '../domain/ledger'
 import { formatTaka } from '../domain/money'
 import { addMonths, monthLabel, shortMonthLabel } from '../domain/month'
-import { closingMethodLabel, members, memberName, type LedgerId, type MemberId } from '../domain/types'
-import type { MemberMap } from '../domain/ledger'
+import { displayRoster, memberName, memberSeq } from '../domain/household'
+import { closingMethodLabel, type LedgerId, type MemberId } from '../domain/types'
+import { inRosterOrder, type MemberMap } from '../domain/ledger'
 import { balanceStatus } from '../report/reportModel'
 import { performBack } from './backNav'
 import { navigate } from './hooks'
@@ -72,8 +73,8 @@ export function MonthSwitcher({
 
 export function Avatar({ id, status }: { id: MemberId; status?: 'due' | 'receivable' | 'settled' }) {
   return (
-    <span className={`avatar avatar-${id} ${status ? `ring-${status}` : ''}`} aria-hidden="true">
-      {memberName(id)[0]}
+    <span className={`avatar avatar-c${((memberSeq(id) % 8) + 8) % 8} ${status ? `ring-${status}` : ''}`} aria-hidden="true">
+      {memberName(id).charAt(0).toLocaleUpperCase()}
     </span>
   )
 }
@@ -165,6 +166,11 @@ export function EmptyState({ icon, title, children }: { icon: IconName; title: s
   )
 }
 
+/** Members present in any of the maps, in roster order. */
+function rowIds(...maps: MemberMap[]): MemberId[] {
+  return inRosterOrder(displayRoster(), maps.flatMap((m) => Object.keys(m)))
+}
+
 export function OpeningTable({ before, after, cashBefore, cashAfter, beforeLabel, afterLabel }: { before: MemberMap; after: MemberMap; cashBefore: number; cashAfter: number; beforeLabel: string; afterLabel: string }) {
   return (
     <table className="impact-table">
@@ -176,11 +182,11 @@ export function OpeningTable({ before, after, cashBefore, cashAfter, beforeLabel
         </tr>
       </thead>
       <tbody>
-        {members().map((m) => (
-          <tr key={m.id} className={before[m.id] !== after[m.id] ? 'changed' : ''}>
-            <th scope="row">{m.name}</th>
-            <td className="num">{formatTaka(before[m.id])}</td>
-            <td className="num">{formatTaka(after[m.id])}</td>
+        {rowIds(before, after).map((id) => (
+          <tr key={id} className={(before[id] ?? 0) !== (after[id] ?? 0) ? 'changed' : ''}>
+            <th scope="row">{memberName(id)}</th>
+            <td className="num">{formatTaka(before[id] ?? 0)}</td>
+            <td className="num">{formatTaka(after[id] ?? 0)}</td>
           </tr>
         ))}
         <tr className={cashBefore !== cashAfter ? 'changed' : ''}>
@@ -203,7 +209,14 @@ function ClosedMonthEffect({ e }: { e: ClosingEffectChange }) {
       ? 'Balances are carried forward, so the change flows into the next month.'
       : `The ${e.closing.method === 'manual' ? 'verified opening' : e.closing.settlementKind === 'waived' ? 'waiver' : 'settlement'} recorded at closing stays as it was; the change is carried into ${next} on top of it.`
   const rows = [
-    ...members().map((m) => ({ key: m.id, name: m.name, orig: e.original.balances[m.id], now: e.closingAfter.balances[m.id], open: e.openingAfter.balances[m.id], openBefore: e.openingBefore.balances[m.id] })),
+    ...rowIds(e.original.balances, e.closingAfter.balances, e.openingAfter.balances, e.openingBefore.balances).map((id) => ({
+      key: id,
+      name: memberName(id),
+      orig: e.original.balances[id] ?? 0,
+      now: e.closingAfter.balances[id] ?? 0,
+      open: e.openingAfter.balances[id] ?? 0,
+      openBefore: e.openingBefore.balances[id] ?? 0,
+    })),
     { key: 'cash', name: 'Cash', orig: e.original.cash, now: e.closingAfter.cash, open: e.openingAfter.cash, openBefore: e.openingBefore.cash },
   ]
   return (

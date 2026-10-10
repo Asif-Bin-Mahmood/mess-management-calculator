@@ -1,9 +1,10 @@
 import { beforeAll, describe, expect, it } from 'vitest'
-import { LEGACY_MEMBER_NAMES, setMemberNames } from '../domain/types'
+import { legacyCategories, legacyMembers, setHouseholdDisplay } from '../domain/household'
 
-beforeAll(() => setMemberNames(LEGACY_MEMBER_NAMES))
+// The household of an upgraded v1.1.1 installation (original names and categories).
+beforeAll(() => setHouseholdDisplay(legacyMembers(), legacyCategories()))
 import { buildClosing } from '../domain/ledger'
-import { tx } from '../domain/testUtils'
+import { R4, tx } from '../domain/testUtils'
 import type { MonthClosing, Transaction } from '../domain/types'
 import { layoutReport, PAGE_H } from './render'
 import { buildReport } from './reportModel'
@@ -45,8 +46,8 @@ const data: Transaction[] = [
   tx('bazar', 'expense', 100, '2026-10-05', { description: 'BAZAR-OCT-NOTE' }),
 ]
 const closings: MonthClosing[] = [
-  buildClosing({ ledger: 'utilities', sourceMonth: '2026-09', method: 'settled', settlementKind: 'waived', cashMode: 'carry', note: 'Agreed at meeting' }, data, [], 'cu', 1),
-  buildClosing({ ledger: 'bazar', sourceMonth: '2026-09', method: 'carry', cashMode: 'carry' }, data, [], 'cb', 2),
+  buildClosing({ ledger: 'utilities', sourceMonth: '2026-09', method: 'settled', settlementKind: 'waived', cashMode: 'carry', note: 'Agreed at meeting' }, R4, data, [], 'cu', 1),
+  buildClosing({ ledger: 'bazar', sourceMonth: '2026-09', method: 'carry', cashMode: 'carry' }, R4, data, [], 'cb', 2),
 ]
 
 /** Sections and wording that the concise default report must not contain. */
@@ -55,10 +56,12 @@ const REMOVED = ['OPENING BALANCES', 'RECONCILIATION', 'Cash held by the manager
 describe('concise report — content per ledger', () => {
   it('Utilities: header, summary, members, categories; only Utilities data', () => {
     for (const paginate of [false, true]) {
-      const text = textOf(layoutReport(buildReport('utilities', '2026-09', data, closings), fakeCanvas, paginate))
+      const text = textOf(layoutReport(buildReport('utilities', R4, '2026-09', data, closings), fakeCanvas, paginate))
       expect(text).toContain('Utilities — September 2026')
       for (const label of ['Total collected', 'Total spent', 'Cash in hand', 'MEMBERS', 'Contributed', 'Due / will receive', 'BY CATEGORY']) expect(text).toContain(label)
-      for (const c of ['Service Charge', 'Current Bill', 'Gas Bill', 'Wi-Fi Bill', 'Others']) expect(text).toContain(c)
+      // Only categories with entries that month are listed (September has a Gas Bill expense only).
+      expect(text).toContain('Gas Bill')
+      for (const c of ['Service Charge', 'Current Bill', 'Wi-Fi Bill', 'Others']) expect(text).not.toContain(c)
       for (const m of ['Asif', 'Dipu', 'Yusha', 'Ovi']) expect(text).toContain(m)
       expect(text).toContain('Will receive ৳1,700.00') // Asif: 2000 − 300 share
       expect(text).not.toContain('Bazar')
@@ -70,7 +73,7 @@ describe('concise report — content per ledger', () => {
 
   it('Bazar: no Utilities categories or data', () => {
     for (const paginate of [false, true]) {
-      const text = textOf(layoutReport(buildReport('bazar', '2026-09', data, closings), fakeCanvas, paginate))
+      const text = textOf(layoutReport(buildReport('bazar', R4, '2026-09', data, closings), fakeCanvas, paginate))
       expect(text).toContain('Bazar — September 2026')
       for (const c of ['BY CATEGORY', 'Service Charge', 'Current Bill', 'Gas Bill', 'Wi-Fi Bill', 'Utilities', 'UTIL-ONLY-NOTE']) expect(text).not.toContain(c)
       for (const r of REMOVED) expect(text).not.toContain(r)
@@ -78,17 +81,17 @@ describe('concise report — content per ledger', () => {
   })
 
   it('optional entries stay within their own ledger', () => {
-    const u = textOf(layoutReport(buildReport('utilities', '2026-09', data, closings), fakeCanvas, true, { includeTransactions: true }))
+    const u = textOf(layoutReport(buildReport('utilities', R4, '2026-09', data, closings), fakeCanvas, true, { includeTransactions: true }))
     expect(u).toContain('UTIL-ONLY-NOTE')
     expect(u).not.toContain('BAZAR-ONLY-NOTE')
-    const b = textOf(layoutReport(buildReport('bazar', '2026-09', data, closings), fakeCanvas, false, { includeTransactions: true }))
+    const b = textOf(layoutReport(buildReport('bazar', R4, '2026-09', data, closings), fakeCanvas, false, { includeTransactions: true }))
     expect(b).toContain('BAZAR-ONLY-NOTE')
     expect(b).not.toContain('UTIL-ONLY-NOTE')
   })
 
   it('a shortage is shown once as “Cash short” with its amount, with no extra warning', () => {
     const short = [...data, tx('bazar', 'expense', 2000, '2026-09-20')]
-    const text = textOf(layoutReport(buildReport('bazar', '2026-09', short, []), fakeCanvas, false))
+    const text = textOf(layoutReport(buildReport('bazar', R4, '2026-09', short, []), fakeCanvas, false))
     expect(text).toContain('Cash short')
     expect(count(text, '৳999.00')).toBe(1) // 5000 − 3999 − 2000 = −999
     expect(text).not.toContain('Cash in hand')
@@ -96,7 +99,7 @@ describe('concise report — content per ledger', () => {
   })
 
   it('a waiver alone needs no attention note (it is recorded and explained)', () => {
-    const text = textOf(layoutReport(buildReport('utilities', '2026-10', data, closings), fakeCanvas, false))
+    const text = textOf(layoutReport(buildReport('utilities', R4, '2026-10', data, closings), fakeCanvas, false))
     expect(text).not.toContain('Attention')
   })
 
@@ -104,7 +107,7 @@ describe('concise report — content per ledger', () => {
     const many = Array.from({ length: 150 }, (_, i) =>
       tx('bazar', 'expense', 10 + i, `2026-08-${String(1 + (i % 28)).padStart(2, '0')}`, { description: `ROW-${String(i).padStart(3, '0')}` }),
     )
-    const pages = layoutReport(buildReport('bazar', '2026-08', many), fakeCanvas, true, { includeTransactions: true })
+    const pages = layoutReport(buildReport('bazar', R4, '2026-08', many), fakeCanvas, true, { includeTransactions: true })
     expect(pages.length).toBeGreaterThan(3)
     for (const p of pages) expect(p.height).toBe(PAGE_H)
     const all = pages.flatMap((p) => p.texts)
@@ -114,8 +117,8 @@ describe('concise report — content per ledger', () => {
     expect(first).toBeGreaterThanOrEqual(0)
     for (const p of pages.slice(first + 1)) expect(p.texts.some((s) => s.includes('(continued)'))).toBe(true)
     // The default report for the same month fits on one page.
-    expect(layoutReport(buildReport('bazar', '2026-08', many), fakeCanvas, true)).toHaveLength(1)
-    const image = layoutReport(buildReport('bazar', '2026-08', many), fakeCanvas, false, { includeTransactions: true })
+    expect(layoutReport(buildReport('bazar', R4, '2026-08', many), fakeCanvas, true)).toHaveLength(1)
+    const image = layoutReport(buildReport('bazar', R4, '2026-08', many), fakeCanvas, false, { includeTransactions: true })
     expect(image).toHaveLength(1)
     expect(image[0].height).toBeGreaterThan(PAGE_H * 3)
   })
@@ -125,8 +128,8 @@ describe('concise report — content per ledger', () => {
     Object.freeze(frozen)
     const fc = closings.map((c) => Object.freeze({ ...c }))
     const snapshot = JSON.stringify([frozen, fc])
-    layoutReport(buildReport('utilities', '2026-10', frozen, fc), fakeCanvas, true, { includeTransactions: true })
-    layoutReport(buildReport('bazar', '2026-10', frozen, fc), fakeCanvas, false)
+    layoutReport(buildReport('utilities', R4, '2026-10', frozen, fc), fakeCanvas, true, { includeTransactions: true })
+    layoutReport(buildReport('bazar', R4, '2026-10', frozen, fc), fakeCanvas, false)
     expect(JSON.stringify([frozen, fc])).toBe(snapshot)
   })
 })
@@ -134,9 +137,9 @@ describe('concise report — content per ledger', () => {
 describe('concise report after a late correction to a closed month', () => {
   it('states once that cash needs review, with the amount, and never claims the accounts balance', () => {
     const base = data.filter((t) => t.ledger === 'utilities')
-    const c = buildClosing({ ledger: 'utilities', sourceMonth: '2026-09', method: 'settled', settlementKind: 'waived', cashMode: 'set', openingCash: 800_00 }, base, [], 'cl', 1)
+    const c = buildClosing({ ledger: 'utilities', sourceMonth: '2026-09', method: 'settled', settlementKind: 'waived', cashMode: 'set', openingCash: 800_00 }, R4, base, [], 'cl', 1)
     const late = [...base, tx('utilities', 'expense', 400, '2026-09-29', { category: 'others' })]
-    const r = buildReport('utilities', '2026-10', late, [c])
+    const r = buildReport('utilities', R4, '2026-10', late, [c])
     expect(r.summary.reconciliation.unexplained).toBe(-400_00)
     for (const paginate of [false, true]) {
       const text = layoutReport(r, fakeCanvas, paginate).flatMap((p) => p.texts).join(' ') // wrapped lines read as one

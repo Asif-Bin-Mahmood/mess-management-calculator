@@ -454,17 +454,30 @@ main {
   color: #fff;
 }
 
-.avatar-asif {
+/* Colour by permanent member position (seq mod 8); positions 1–4 keep the original four colours. */
+.avatar-c0 {
   background: #3b6e8f;
 }
-.avatar-dipu {
+.avatar-c1 {
   background: #8a5a2b;
 }
-.avatar-yusha {
+.avatar-c2 {
   background: #5b4f8a;
 }
-.avatar-ovi {
+.avatar-c3 {
   background: #2f7a5f;
+}
+.avatar-c4 {
+  background: #9c3f5c;
+}
+.avatar-c5 {
+  background: #4f6a24;
+}
+.avatar-c6 {
+  background: #2b6578;
+}
+.avatar-c7 {
+  background: #8c4a2f;
 }
 
 .balance {
@@ -1213,8 +1226,9 @@ main {
   gap: 8px;
 }
 
-.choice-4 {
-  grid-template-columns: repeat(4, 1fr);
+.choice-4,
+.choice-members {
+  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
 }
 
 .choice {
@@ -1234,14 +1248,16 @@ main {
   cursor: pointer;
 }
 
-.choice-4 .choice {
+.choice-4 .choice,
+.choice-members .choice {
   flex-direction: column;
   gap: 4px;
   padding: 10px 4px;
   font-size: 14px;
 }
 
-.choice-4 .avatar {
+.choice-4 .avatar,
+.choice-members .avatar {
   width: 32px;
   height: 32px;
   font-size: 14px;
@@ -1264,7 +1280,7 @@ main {
   outline-offset: 2px;
 }
 
-.choice-grid > .choice:last-child:nth-child(odd):not(.choice-4 > .choice) {
+.choice-grid > .choice:last-child:nth-child(odd):not(.choice-4 > .choice):not(.choice-members > .choice) {
   grid-column: span 2;
 }
 

@@ -2,6 +2,7 @@ import {
   analyzeUndo,
   buildClosing,
   canClose,
+  computeLedgerMonth,
   previewClosing,
   type ClosingInput,
   type ClosingPreview,
@@ -23,15 +24,18 @@ export class ClosingError extends Error {
 }
 
 async function ledgerData(database: MessDb, ledger: LedgerId) {
-  const [transactions, closings] = await Promise.all([
+  const [transactions, closings, roster] = await Promise.all([
     database.transactions.where('ledger').equals(ledger).toArray(),
     database.closings.where('ledger').equals(ledger).toArray(),
+    database.members.toArray(),
   ])
-  return { transactions, closings }
+  return { transactions, closings, roster }
 }
 
-function check(input: ClosingInput, closings: MonthClosing[], now: number) {
-  const errors = validateClosingInput(input)
+function check(input: ClosingInput, d: Awaited<ReturnType<typeof ledgerData>>, now: number) {
+  const { closings } = d
+  const shown = computeLedgerMonth(input.ledger, d.roster, d.transactions, input.sourceMonth, closings).members.map((m) => m.memberId)
+  const errors = validateClosingInput(input, shown)
   if (Object.keys(errors).length) throw new ClosingError('Please fix the highlighted fields.', { errors })
   const ok = canClose(input.ledger, input.sourceMonth, closings, currentMonth(new Date(now)))
   if (!ok.ok) throw new ClosingError(ok.reason, { blockingMonth: ok.blockingMonth })
@@ -43,10 +47,10 @@ export async function planClosing(
   database: MessDb = defaultDb,
   now = Date.now(),
 ): Promise<{ closing: MonthClosing; preview: ClosingPreview }> {
-  const { transactions, closings } = await ledgerData(database, input.ledger)
-  check(input, closings, now)
-  const closing = buildClosing(input, transactions, closings, 'preview', now)
-  return { closing, preview: previewClosing(closing, transactions, closings) }
+  const d = await ledgerData(database, input.ledger)
+  check(input, d, now)
+  const closing = buildClosing(input, d.roster, d.transactions, d.closings, 'preview', now)
+  return { closing, preview: previewClosing(closing, d.roster, d.transactions, d.closings) }
 }
 
 /**
@@ -54,10 +58,10 @@ export async function planClosing(
  * tap or a second open tab cannot create two closings for the same ledger and month.
  */
 export async function applyClosing(input: ClosingInput, database: MessDb = defaultDb, now = Date.now()): Promise<MonthClosing> {
-  return database.transaction('rw', database.transactions, database.closings, database.audit, async () => {
-    const { transactions, closings } = await ledgerData(database, input.ledger)
-    check(input, closings, now)
-    const closing = buildClosing(input, transactions, closings, crypto.randomUUID(), now)
+  return database.transaction('rw', [database.transactions, database.closings, database.audit, database.members], async () => {
+    const d = await ledgerData(database, input.ledger)
+    check(input, d, now)
+    const closing = buildClosing(input, d.roster, d.transactions, d.closings, crypto.randomUUID(), now)
     await database.closings.add(closing)
     await database.audit.add({ at: now, action: 'close', txId: `closing:${closing.id}`, ledger: closing.ledger, closingAfter: closing })
     return closing
@@ -68,8 +72,8 @@ export async function planUndoClosing(id: string, database: MessDb = defaultDb, 
   const closing = await database.closings.get(id)
   if (!closing) throw new ClosingError('This closing no longer exists.')
   if (closing.undoneAt !== undefined) throw new ClosingError('This closing has already been undone.')
-  const { transactions, closings } = await ledgerData(database, closing.ledger)
-  return analyzeUndo(closing, transactions, closings, currentMonth(new Date(now)))
+  const { transactions, closings, roster } = await ledgerData(database, closing.ledger)
+  return analyzeUndo(closing, roster, transactions, closings, currentMonth(new Date(now)))
 }
 
 /**
@@ -78,12 +82,12 @@ export async function planUndoClosing(id: string, database: MessDb = defaultDb, 
  * later closing depends on it or when it was already undone.
  */
 export async function undoClosing(id: string, database: MessDb = defaultDb, now = Date.now()): Promise<MonthClosing> {
-  return database.transaction('rw', database.transactions, database.closings, database.audit, async () => {
+  return database.transaction('rw', [database.transactions, database.closings, database.audit, database.members], async () => {
     const closing = await database.closings.get(id)
     if (!closing) throw new ClosingError('This closing no longer exists.')
     if (closing.undoneAt !== undefined) throw new ClosingError('This closing has already been undone.')
-    const { transactions, closings } = await ledgerData(database, closing.ledger)
-    const analysis = analyzeUndo(closing, transactions, closings, currentMonth(new Date(now)))
+    const { transactions, closings, roster } = await ledgerData(database, closing.ledger)
+    const analysis = analyzeUndo(closing, roster, transactions, closings, currentMonth(new Date(now)))
     if (analysis.blockedBy.length) {
       throw new ClosingError('A later month is closed and depends on this one. Undo the later closing first.', {
         blockingMonth: analysis.blockedBy[0].sourceMonth,

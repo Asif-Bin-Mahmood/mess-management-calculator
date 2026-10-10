@@ -1,17 +1,8 @@
 import { computeLedgerMonth, openingFromClosing, type MonthOpening, type MonthSummary, type Reconciliation } from '../domain/ledger'
 import { formatTaka } from '../domain/money'
 import { monthLabel } from '../domain/month'
-import {
-  categoryName,
-  isMemberTx,
-  ledgerName,
-  memberName,
-  MEMBER_IDS,
-  type LedgerId,
-  type MemberId,
-  type MonthClosing,
-  type Transaction,
-} from '../domain/types'
+import type { Roster } from '../domain/household'
+import { categoryName, isMemberTx, ledgerName, memberName, type LedgerId, type MemberId, type MonthClosing, type Transaction } from '../domain/types'
 
 export interface Report {
   ledger: LedgerId
@@ -34,6 +25,7 @@ export interface Report {
  */
 export function buildReport(
   ledger: LedgerId,
+  roster: Roster,
   month: string,
   all: readonly Transaction[],
   closings: readonly MonthClosing[] = [],
@@ -41,7 +33,7 @@ export function buildReport(
 ): Report {
   const own = all.filter((t) => t.ledger === ledger)
   const ownClosings = closings.filter((c) => c.ledger === ledger)
-  const summary = computeLedgerMonth(ledger, own, month, ownClosings)
+  const summary = computeLedgerMonth(ledger, roster, own, month, ownClosings)
   return {
     ledger,
     ledgerName: ledgerName(ledger),
@@ -71,9 +63,11 @@ export function balanceLabel(closing: number): string {
 
 /** Which members received the leftover poisha of the expense split, in allocation order. */
 export function roundingNote(summary: MonthSummary): string {
-  const shares = summary.members.map((m) => m.share)
-  const min = Math.min(...shares)
-  const extra = summary.members.filter((m) => m.share > min).map((m) => memberName(m.memberId))
+  // Only members sharing the month have a share (a former member shown for a balance has none).
+  const sharing = summary.members.filter((m) => summary.sharers.includes(m.memberId))
+  if (sharing.length === 0) return 'Nobody shares this month’s expenses.'
+  const min = Math.min(...sharing.map((m) => m.share))
+  const extra = sharing.filter((m) => m.share > min).map((m) => memberName(m.memberId))
   if (extra.length === 0) return `Expense split equally: ${formatTaka(min, { decimals: 'always' })} each.`
   return `Expense split ${formatTaka(min, { decimals: 'always' })} each; the leftover ${extra.length} poisha went one each to ${extra.join(', ')} (rotating by month) so shares add up exactly.`
 }
@@ -90,7 +84,7 @@ export function txCashEffect(t: Transaction): number {
 }
 
 export function memberRow(summary: MonthSummary, id: MemberId) {
-  return summary.members[MEMBER_IDS.indexOf(id)]
+  return summary.members.find((m) => m.memberId === id)
 }
 
 export function reportFileBase(r: Report): string {

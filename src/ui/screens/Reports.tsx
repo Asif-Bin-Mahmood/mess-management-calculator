@@ -10,9 +10,9 @@ import { useToast } from '../context'
 import { Icon } from '../icons'
 
 export function Reports({ ledger }: { ledger: LedgerId }) {
-  const { txs, closings, month, setMonth, minMonth, maxMonth } = useApp()
+  const { txs, closings, month, setMonth, minMonth, maxMonth, members } = useApp()
   const toast = useToast()
-  const report = useMemo(() => buildReport(ledger, month, txs ?? [], closings), [ledger, month, txs, closings])
+  const report = useMemo(() => buildReport(ledger, members, month, txs ?? [], closings), [ledger, members, month, txs, closings])
   const [withEntries, setWithEntries] = useState(false)
   const [rendered, setRendered] = useState<{ report: typeof report; withEntries: boolean; url: string } | null>(null)
   const preview = rendered?.report === report && rendered.withEntries === withEntries ? rendered.url : null

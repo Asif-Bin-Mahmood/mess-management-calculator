@@ -16,6 +16,7 @@ import { CloseMonth } from './ui/screens/MonthClosing'
 import { Reports } from './ui/screens/Reports'
 import { Settings } from './ui/screens/Settings'
 import { TxForm } from './ui/screens/TxForm'
+import { CategoriesScreen, MembersScreen, Setup } from './ui/screens/Household'
 import { UpdateProvider } from './update/UpdateProvider'
 
 function isLedger(s: string | undefined): s is LedgerId {
@@ -38,7 +39,7 @@ export default function App() {
 
 function Shell() {
   const route = useRoute()
-  const { txs } = useApp()
+  const { txs, needsSetup } = useApp()
   const toast = useToast()
 
   useEffect(() => {
@@ -72,12 +73,17 @@ function Shell() {
   else if (isLedger(a)) screen = <Ledger ledger={a} />
   // Old shared reports link: send to the ledger's own report.
   else if (a === 'reports') screen = <Reports ledger={isLedger(b) ? b : 'utilities'} />
+  else if (a === 'settings' && b === 'members') screen = <MembersScreen />
+  else if (a === 'settings' && b === 'categories') screen = <CategoriesScreen />
   else if (a === 'settings') screen = <Settings />
   else {
     screen = <Home />
     tab = ''
   }
-  const inForm = b === 'new' || b === 'edit' || b === 'close'
+  // A fresh installation sets up its household first (Backup & settings stays reachable to restore a backup).
+  const setup = needsSetup && a !== 'settings'
+  if (setup) screen = <Setup />
+  const inForm = setup || b === 'new' || b === 'edit' || b === 'close' || (a === 'settings' && !!b)
 
   // Scroll to top on screen change.
   const key = route.join('/')
