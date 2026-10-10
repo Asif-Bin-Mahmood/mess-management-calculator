@@ -2,7 +2,7 @@
  * Household screens: first-launch setup, members, and Utilities categories.
  * Membership is household-wide (both ledgers) and counted in whole calendar months.
  */
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   addCategory,
   applyMemberChange,
@@ -20,7 +20,7 @@ import {
   type MemberChange,
   type RosterPlan,
 } from '../../db/household'
-import { CATEGORY_TEMPLATES, isCurrentMember, MAX_MEMBERS, MAX_NAME, memberName, sharesIn, validateNames, type Category, type Member } from '../../domain/household'
+import { CATEGORY_TEMPLATES, isCurrentMember, MAX_MEMBERS, MAX_NAME, memberName, validateNames, type Category, type Member } from '../../domain/household'
 import { firstOpenMonth, memberBalances, memberIsReferenced } from '../../domain/ledger'
 import { formatTaka } from '../../domain/money'
 import { addMonths, currentMonth, isValidMonth, monthLabel } from '../../domain/month'
@@ -112,9 +112,9 @@ export function Setup() {
               <Icon name="plus" />
             </button>
           </div>
-          <div className="form-actions">
+          <div className="card-actions">
             <button type="button" className="btn btn-ghost" onClick={() => navigate('settings')}>
-              <Icon name="upload" size={18} /> Restore a backup instead
+              <Icon name="upload" size={18} /> Restore a backup
             </button>
             <button type="button" className="btn btn-primary btn-lg" onClick={() => setStep('names')}>
               Continue
@@ -148,7 +148,7 @@ export function Setup() {
               </label>
             ))}
           </div>
-          <div className="form-actions">
+          <div className="card-actions">
             <button type="button" className="btn btn-ghost" onClick={() => setStep('count')}>
               Back
             </button>
@@ -194,7 +194,7 @@ export function Setup() {
             </button>
           </div>
           {catError && <p className="field-error">{catError}</p>}
-          <div className="form-actions">
+          <div className="card-actions">
             <button type="button" className="btn btn-ghost" onClick={() => setStep('names')}>
               Back
             </button>
@@ -219,7 +219,7 @@ export function Setup() {
             </div>
           </dl>
           <p className="card-text">All members share expenses from the start. Both ledgers, Utilities and Bazar, use this household.</p>
-          <div className="form-actions">
+          <div className="card-actions">
             <button type="button" className="btn btn-ghost" onClick={() => setStep('categories')} disabled={busy}>
               Back
             </button>
@@ -239,8 +239,19 @@ type Panel = { kind: 'add' } | { kind: 'rename'; m: Member } | { kind: 'end'; m:
 
 function periodText(m: Member): string {
   return m.periods
-    .map((p) => `${p.from ? monthLabel(p.from) : 'the start'} – ${p.until ? monthLabel(p.until) : 'now'}`)
+    .map((p) => {
+      const from = p.from ? monthLabel(p.from) : 'the start'
+      return p.until ? `${from} – ${monthLabel(p.until)}` : `since ${from}`
+    })
     .join(', ')
+}
+
+/** One line for a current member: sharing now (and until when), or the month they start. */
+function currentStatus(m: Member, now: string): string {
+  const p = m.periods.find((x) => (x.from === undefined || x.from <= now) && (x.until === undefined || now <= x.until))
+  if (p) return p.until ? `Sharing until ${monthLabel(p.until)}` : `Sharing since ${p.from ? monthLabel(p.from) : 'the start'}`
+  const next = m.periods.find((x) => x.from !== undefined && x.from > now)
+  return next?.from ? `Starts ${monthLabel(next.from)}` : periodText(m)
 }
 
 export function MembersScreen() {
@@ -320,15 +331,21 @@ export function MembersScreen() {
               <Avatar id={m.id} />
               <span className="row-main">
                 <span className="row-title">{m.name}</span>
-                <span className="row-sub">{sharesIn(m, now) ? `Sharing · ${periodText(m)}` : `Starts ${periodText(m)}`}</span>
+                <span className="row-sub">{currentStatus(m, now)}</span>
               </span>
               <span className="row-actions">
                 <button type="button" className="icon-btn" aria-label={`Rename ${m.name}`} onClick={() => setPanel({ kind: 'rename', m })}>
                   <Icon name="edit" size={18} />
                 </button>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPanel({ kind: 'end', m })}>
-                  Leaves
-                </button>
+                {m.periods[m.periods.length - 1]?.until === undefined ? (
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPanel({ kind: 'end', m })}>
+                    Leaves
+                  </button>
+                ) : (
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPanel({ kind: 'rejoin', m })}>
+                    Rejoins
+                  </button>
+                )}
               </span>
             </li>
           ))}
@@ -469,6 +486,10 @@ function MemberPanel({
   const [name, setName] = useState(panel.kind === 'rename' ? panel.m.name : '')
   const [month, setMonth] = useState(defaultMonth)
   const [error, setError] = useState<string | null>(null)
+  const ref = useRef<HTMLElement>(null)
+  useEffect(() => {
+    ref.current?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  }, [])
   useLeaveGuard(panel.kind === 'add' ? name.trim() !== '' : panel.kind === 'rename' ? name.trim() !== panel.m.name : false, 'this change')
 
   const title = { add: 'Add a member', rename: `Rename ${m?.name}`, end: `${m?.name} leaves`, rejoin: `${m?.name} rejoins` }[panel.kind]
@@ -488,7 +509,7 @@ function MemberPanel({
   }
 
   return (
-    <section className="card card-panel" aria-labelledby="panel-h">
+    <section ref={ref} className="card card-panel" aria-labelledby="panel-h">
       <div className="card-head">
         <h2 id="panel-h" className="card-title">
           {title}
@@ -518,7 +539,7 @@ function MemberPanel({
         </label>
       )}
       {error && <p className="field-error">{error}</p>}
-      <div className="form-actions">
+      <div className="card-actions">
         <button type="button" className="btn btn-ghost" onClick={onCancel}>
           Cancel
         </button>

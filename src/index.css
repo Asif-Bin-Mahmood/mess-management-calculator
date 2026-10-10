@@ -2063,3 +2063,199 @@ body:has(.app-form) .toasts {
   border-color: var(--line);
   color: var(--ink);
 }
+
+/* ───────── Household: setup, members, categories ───────── */
+
+.screen-intro {
+  margin: 0 4px 12px;
+}
+
+.setup-step {
+  margin: 0 4px 8px;
+}
+
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0 4px;
+}
+
+.stepper .icon-btn {
+  border: 1.5px solid var(--line);
+  width: 48px;
+  height: 48px;
+}
+
+.stepper-value {
+  width: 88px;
+  text-align: center;
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.check-list,
+.row-list,
+.link-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.check-list li + li,
+.row-list li + li,
+.link-list li + li {
+  border-top: 1px solid var(--line);
+}
+
+.inline-add {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.inline-add .input {
+  flex: 1;
+  min-width: 0;
+}
+
+.row-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 60px;
+  padding: 8px 0;
+}
+
+.row-item > .input {
+  flex: 1;
+  min-width: 0;
+}
+
+.row-main {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.row-title {
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.row-sub {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.row-warn {
+  color: var(--warn-ink);
+  font-weight: 700;
+}
+
+.row-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}
+
+.row-list + .btn,
+.row-list + .empty-state + .btn {
+  margin-top: 12px;
+}
+
+.card-panel {
+  border: 1.5px solid var(--primary);
+}
+
+.link-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 12px;
+  min-height: 60px;
+  padding: 8px 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.link-row-main {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.link-row-title {
+  font-weight: 700;
+}
+
+.link-row-sub {
+  color: var(--muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.choice-name {
+  overflow-wrap: anywhere;
+}
+
+.choice-note {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.empty-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  border: 1px dashed var(--line);
+}
+
+.empty-hint p {
+  margin: 0;
+  flex: 1 1 180px;
+  color: var(--muted);
+}
+
+@media (max-width: 380px) {
+  .member-names {
+    grid-template-columns: 1fr;
+  }
+
+  .row-item {
+    flex-wrap: wrap;
+  }
+
+  .row-actions {
+    margin-left: auto;
+  }
+}
+
+/* Actions inside a card (not the sticky bar used by full-screen entry forms). */
+.card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.card-actions .btn {
+  flex: 1 1 140px;
+}

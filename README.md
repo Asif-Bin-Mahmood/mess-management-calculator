@@ -1,6 +1,6 @@
 # Mess Ledger
 
-Mess Ledger is an offline-first accounting app for a shared household or mess of four members. It
+Mess Ledger is an offline-first accounting app for a shared household or mess of any size. It
 tracks shared spending in two separate ledgers, works out what each member is due to pay or will
 receive, and produces monthly reports, all on the device and without an account or internet connection.
 
@@ -10,9 +10,10 @@ It is available as an Android app (APK) and can also run as an installable web a
 
 - **Two independent ledgers:** Utilities and Bazar each have their own entries, cash, balances,
   closings and reports. Nothing moves between them.
-- **Customizable members:** set the display names of the four members at any time.
-- **Balances:** each month's spending is shared equally. Every member's balance shows whether they are
-  **Due** to pay or **Will receive** money back.
+- **Your household:** any number of members, who can join, leave and rejoin; Utilities categories you
+  define, rename and archive.
+- **Balances:** each month's spending is shared equally among the members sharing that month. Every
+  member's balance shows whether they are **Due** to pay or **Will receive** money back.
 - **Monthly closing:** close a month to carry balances forward, start the next month settled at zero, or
   enter verified balances. Closings can be undone.
 - **Reports:** concise monthly reports per ledger as PDF, PNG or JPEG, saved or shared from the device.
@@ -50,12 +51,19 @@ The same app can be built and served from any static HTTPS host (see [Developmen
 Open it in Chrome, choose **Install app**, and open it once while online so it is available offline.
 The web app keeps its own records, separate from the Android app.
 
-## Member customization
+## Household setup
 
-Open **Backup → Members**, enter the four names, and choose **Save names**. Names must be different
-from each other and up to 24 characters long. Renaming changes only how members are displayed in the
-app and in reports; amounts, balances and history stay exactly the same. Member names are included in
-full backups.
+On first launch, the app asks how many members share the expenses, their names, and which Utilities
+categories to use (suggestions are offered; all are optional). An existing installation keeps its members,
+names and categories when it is updated.
+
+- **Members** (**Backup → Household → Members**): add a member, rename one, or record that someone leaves
+  or rejoins. Membership counts in whole calendar months and applies to both ledgers. Closed months are
+  never changed, so a change starts from the first month that is still open, and a preview shows its effect
+  before you confirm. A member who leaves keeps their balance until it is settled; it is never moved onto
+  the others. Renaming changes only the displayed name.
+- **Utilities categories** (**Backup → Household → Utilities categories**): add, rename or archive.
+  Archived categories are no longer offered for new entries but stay on existing entries and in reports.
 
 ## Backup and restore
 
