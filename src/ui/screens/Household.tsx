@@ -21,7 +21,7 @@ import {
   type RosterPlan,
 } from '../../db/household'
 import { CATEGORY_TEMPLATES, isCurrentMember, MAX_MEMBERS, MAX_NAME, memberName, validateNames, type Category, type Member } from '../../domain/household'
-import { firstOpenMonth, memberBalances, memberIsReferenced } from '../../domain/ledger'
+import { firstOpenMonth, memberBalances, memberRemovable } from '../../domain/ledger'
 import { formatTaka } from '../../domain/money'
 import { addMonths, currentMonth, isValidMonth, MAX_MONTH, MIN_MONTH, monthLabel } from '../../domain/month'
 import { ledgerName, type LedgerId } from '../../domain/types'
@@ -417,7 +417,7 @@ export function MembersScreen() {
           <ul className="row-list">
             {former.map((m) => {
               const owe = outstanding(m)
-              const deletable = !memberIsReferenced(m.id, txs ?? [], closings)
+              const deletable = memberRemovable(m.id, members, txs ?? [], closings, now)
               return (
                 <li key={m.id} className="row-item">
                   <Avatar id={m.id} />

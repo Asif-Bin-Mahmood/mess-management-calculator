@@ -899,9 +899,12 @@ export function analyzeRosterChange(
       .filter((x) => {
         const y = byA.get(x.month)
         if (!y) return true
-        if (x.remainingCash !== y.remainingCash || x.averagePerPerson !== y.averagePerPerson) return true
-        const shares = (s: MonthSummary) => JSON.stringify(s.members.map((m) => [m.memberId, m.share, m.closing]))
-        return shares(x) !== shares(y)
+        if (x.remainingCash !== y.remainingCash || x.unallocatedSpend !== y.unallocatedSpend) return true
+        // Compare amounts only (a member missing from a month counts as 0), so an empty row appearing or
+        // disappearing is not a change, while any moved share or balance is.
+        const ids = new Set([...x.members, ...y.members].map((m) => m.memberId))
+        const get = (sm: MonthSummary, id: MemberId) => sm.members.find((m) => m.memberId === id)
+        return [...ids].some((id) => (get(x, id)?.share ?? 0) !== (get(y, id)?.share ?? 0) || (get(x, id)?.closing ?? 0) !== (get(y, id)?.closing ?? 0))
       })
       .map((x) => x.month)
     ledgers.push({
@@ -938,6 +941,23 @@ export function memberIsReferenced(id: MemberId, transactions: readonly Transact
       (c.openingBalances !== undefined && id in c.openingBalances) ||
       (c.adjustments !== undefined && id in c.adjustments.members),
   )
+}
+
+/**
+ * A member can be removed completely only if nothing refers to them AND removing them changes no figure in
+ * either ledger (they never shared a month with spending). Otherwise their membership is ended instead, so
+ * every past share stays where it is.
+ */
+export function memberRemovable(
+  id: MemberId,
+  roster: Roster,
+  transactions: readonly Transaction[],
+  closings: readonly MonthClosing[],
+  horizon: string,
+): boolean {
+  if (memberIsReferenced(id, transactions, closings)) return false
+  const impact = analyzeRosterChange(roster, roster.filter((m) => m.id !== id), transactions, closings, horizon)
+  return impact.blockedBy === null && impact.ledgers.every((l) => l.changedMonths.length === 0)
 }
 
 /** True when any transaction (including deleted ones) uses the category. */

@@ -21,7 +21,7 @@ import {
   type MemberId,
   type MembershipPeriod,
 } from '../domain/household'
-import { analyzeRosterChange, categoryIsReferenced, firstOpenMonth, memberIsReferenced, type RosterChangeImpact } from '../domain/ledger'
+import { analyzeRosterChange, categoryIsReferenced, firstOpenMonth, memberIsReferenced, memberRemovable, type RosterChangeImpact } from '../domain/ledger'
 import { currentMonth, isValidMonth, monthLabel } from '../domain/month'
 import { db as defaultDb, type MessDb } from './db'
 import { loadHousehold } from './repo'
@@ -226,17 +226,20 @@ export async function renameMember(id: MemberId, name: string, database: MessDb 
   })
 }
 
-/** True when the member can be removed completely (nothing has ever referred to it, e.g. a setup typo). */
-export async function canDeleteMember(id: MemberId, database: MessDb = defaultDb): Promise<boolean> {
-  const { transactions, closings } = await everything(database)
-  return !memberIsReferenced(id, transactions, closings)
+/** True when the member can be removed completely (nothing refers to them and no figure would change, e.g. a setup typo). */
+export async function canDeleteMember(id: MemberId, database: MessDb = defaultDb, now = Date.now()): Promise<boolean> {
+  const { transactions, closings, members } = await everything(database)
+  return memberRemovable(id, members, transactions, closings, currentMonth(new Date(now)))
 }
 
 /** Removes a member that nothing refers to. Members with any history are ended (archived) instead. */
 export async function deleteMember(id: MemberId, database: MessDb = defaultDb, now = Date.now()): Promise<void> {
   await database.transaction('rw', tables(database), async () => {
-    const { transactions, closings } = await everything(database)
+    const { transactions, closings, members } = await everything(database)
     if (memberIsReferenced(id, transactions, closings)) throw new HouseholdError('This member has entries or closings, so the history is kept. End the membership instead.')
+    if (!memberRemovable(id, members, transactions, closings, currentMonth(new Date(now)))) {
+      throw new HouseholdError('This member shared expenses already recorded, so removing them would change the other members’ shares. Record that they leave instead.')
+    }
     await commit(
       database,
       now,

@@ -270,3 +270,37 @@ describe('backups of a configurable household', () => {
     await other.delete()
   })
 })
+
+describe('audit regressions', () => {
+  it('a member who shares months with expenses cannot be removed, even with no own entries (their share would move)', async () => {
+    await setupHousehold(['Ana', 'Ben'], [], db, NOW - 1)
+    await applyMemberChange({ kind: 'add', name: 'Cy', from: '2026-05' }, db, NOW)
+    const cy = await byName('Cy')
+    await bazar(300, '2026-05-03') // Cy has a ৳100 share but no entry of their own
+    await applyMemberChange({ kind: 'end', id: cy.id, lastMonth: '2026-05' }, db, NOW)
+    const before = await summary('bazar', '2026-06')
+    expect(await canDeleteMember(cy.id, db)).toBe(false)
+    await expect(deleteMember(cy.id, db, NOW)).rejects.toThrow(/shared expenses/)
+    expect(await summary('bazar', '2026-06')).toEqual(before)
+  })
+
+  it('undoing a single-ledger restore keeps members and categories the other ledger now uses', async () => {
+    await setupHousehold(['Ana', 'Ben'], ['Gas'], db, NOW - 1)
+    await bazar(100, '2026-05-03')
+    const file = checkBackup(JSON.stringify(await createBackup(db, new Date(NOW), 'bazar')))
+    if (!file.ok) throw new Error(file.errors.join())
+    await restoreBackup(file.data, db, NOW + 1)
+    // After the restore: a new member and category, used by Utilities entries.
+    await applyMemberChange({ kind: 'add', name: 'Cy', from: '2026-06' }, db, NOW + 2)
+    const cy = await byName('Cy')
+    const water = await addCategory('Water', db, NOW + 2)
+    await applyMutation({ kind: 'create', input: { ledger: 'utilities', type: 'contribution', amount: 50_00, date: '2026-06-02', memberId: cy.id } }, db, NOW + 3)
+    await applyMutation({ kind: 'create', input: { ledger: 'utilities', type: 'expense', amount: 30_00, date: '2026-06-02', category: water.id } }, db, NOW + 3)
+    await undoLastRestore(db, NOW + 4)
+    const h = await loadHousehold(db)
+    expect(h.members.map((m) => m.name)).toContain('Cy')
+    expect(h.categories.map((c) => c.name)).toContain('Water')
+    // Everything is still consistent: a new backup validates.
+    expect(checkBackup(JSON.stringify(await createBackup(db, new Date(NOW + 5)))).ok).toBe(true)
+  })
+})

@@ -14,7 +14,7 @@ import {
   type Member,
   type Roster,
 } from '../domain/household'
-import { computeHistory, type MonthSummary } from '../domain/ledger'
+import { categoryIsReferenced, computeHistory, memberRemovable, type MonthSummary } from '../domain/ledger'
 import { currentMonth } from '../domain/month'
 import type { LedgerId, MonthClosing, Transaction } from '../domain/types'
 import { validateClosing, validateTransaction } from '../domain/validate'
@@ -432,6 +432,9 @@ interface RestoreUndo {
   /** Registry before the restore. */
   members?: Member[]
   categories?: Category[]
+  /** Single-ledger restores: ids of members/categories the restore added (candidates for removal on undo). */
+  addedMemberIds?: string[]
+  addedCategoryIds?: string[]
   /** Restores made by app 1.1.1 stored the four names here when the restore changed them. */
   memberNames?: Record<string, string>
 }
@@ -491,7 +494,17 @@ export async function restoreBackup(
     const oldTxs = scope === 'all' ? local.transactions : local.transactions.filter((t) => t.ledger === scope)
     const oldClosings = scope === 'all' ? local.closings : local.closings.filter((c) => c.ledger === scope)
 
-    const undo: RestoreUndo = { scope, at: now, backupId: data.backupId, transactions: oldTxs, closings: oldClosings, members: local.members, categories: local.categories }
+    const undo: RestoreUndo = {
+      scope,
+      at: now,
+      backupId: data.backupId,
+      transactions: oldTxs,
+      closings: oldClosings,
+      members: local.members,
+      categories: local.categories,
+      addedMemberIds: reg.members.filter((m) => !local.members.some((x) => x.id === m.id)).map((m) => m.id),
+      addedCategoryIds: reg.categories.filter((c) => !local.categories.some((x) => x.id === c.id)).map((c) => c.id),
+    }
     await database.meta.put({ key: RESTORE_UNDO_KEY, value: undo })
     await database.meta.put({ key: RESTORE_UNDO_INFO_KEY, value: { scope, at: now } })
 
@@ -560,8 +573,31 @@ export async function undoLastRestore(database: MessDb = defaultDb, now = Date.n
     }
     await addInChunks(database.transactions, u.transactions, () => {})
     await database.closings.bulkAdd(u.closings)
-    if (u.members && u.categories) {
+    if (u.members && u.categories && u.scope === 'all') {
+      // Everything returns to the state before the restore (records and household together).
       await replaceRegistry(database, u.members, u.categories)
+    } else if (u.members && u.categories) {
+      // Single ledger: the other ledger was not part of the restore and may now use members or categories created
+      // since. Keep every record still needed; bring back any the restored records need; drop only what the
+      // restore itself added, when nothing uses it any more and removing it changes no figure.
+      const txsNow = await database.transactions.toArray()
+      const closingsNow = await database.closings.toArray()
+      let members = (await database.members.toArray()).sort(bySeq)
+      let categories = (await database.categories.toArray()).sort(bySeq)
+      for (const m of u.members) if (!members.some((x) => x.id === m.id)) members.push(m)
+      for (const c of u.categories) if (!categories.some((x) => x.id === c.id) && categoryIsReferenced(c.id, txsNow)) categories.push(c)
+      const horizon = currentMonth(new Date(now))
+      for (const id of u.addedMemberIds ?? []) {
+        if (memberRemovable(id, members, txsNow, closingsNow, horizon)) members = members.filter((m) => m.id !== id)
+      }
+      for (const id of u.addedCategoryIds ?? []) {
+        if (!categoryIsReferenced(id, txsNow)) categories = categories.filter((c) => c.id !== id)
+      }
+      // Members restored from the snapshot that nothing needs (and that change no figure) are not kept either.
+      for (const m of u.members) {
+        if (!(await database.members.get(m.id)) && memberRemovable(m.id, members, txsNow, closingsNow, horizon)) members = members.filter((x) => x.id !== m.id)
+      }
+      await replaceRegistry(database, members.sort(bySeq), categories.sort(bySeq))
     } else if (u.memberNames) {
       // Undo snapshot written by app 1.1.1: it changed only the four display names.
       for (const m of await database.members.toArray()) {
