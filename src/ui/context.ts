@@ -11,6 +11,8 @@ export interface ConfirmOptions {
   danger?: boolean
   /** When set, the user must type this word before confirming. */
   requireText?: string
+  /** Information sheet (not a decision): a single neutral Close button. */
+  help?: boolean
 }
 
 export type ConfirmFn = (o: ConfirmOptions) => Promise<boolean>

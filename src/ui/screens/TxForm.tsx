@@ -286,7 +286,7 @@ function FormBody({ ledger, existing, initialKind, month }: { ledger: LedgerId; 
           <span>
             <strong>{kind === 'in' ? 'Money returned to member' : 'Refund received'}</strong>
             <span className="field-hint">
-              {kind === 'in' ? 'Cash given back to a member. Reduces their contribution.' : 'A shop or biller returned money. Reduces total spent.'}
+              {kind === 'in' ? 'Cash given back to a member.' : 'Money returned by a shop or biller.'}
             </span>
           </span>
         </label>

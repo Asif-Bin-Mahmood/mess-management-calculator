@@ -5,7 +5,7 @@ import { ConfirmContext, ToastContext, type ConfirmFn, type ConfirmOptions, type
 /* ───────────── Confirmation sheet ───────────── */
 
 export function ConfirmProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<{ o: ConfirmOptions; resolve: (v: boolean) => void } | null>(null)
+  const [state, setState] = useState<{ o: ConfirmOptions; resolve: (v: boolean) => void; returnFocus: HTMLElement | null } | null>(null)
   const [typed, setTyped] = useState('')
   const ref = useRef<HTMLDialogElement>(null)
 
@@ -13,7 +13,9 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
     (o) =>
       new Promise<boolean>((resolve) => {
         setTyped('')
-        setState({ o, resolve })
+        // Remember what opened the sheet, so focus goes back there when it closes.
+        const active = typeof document !== 'undefined' ? document.activeElement : null
+        setState({ o, resolve, returnFocus: active instanceof HTMLElement ? active : null })
       }),
     [],
   )
@@ -34,6 +36,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
     return pushOverlay(() => {
       ref.current?.close()
       state.resolve(false)
+      state.returnFocus?.focus()
       setState(null)
     })
   }, [state])
@@ -41,6 +44,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
   const close = (v: boolean) => {
     ref.current?.close()
     state?.resolve(v)
+    if (state?.returnFocus?.isConnected) state.returnFocus.focus()
     setState(null)
   }
 
@@ -51,7 +55,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
       {children}
       <dialog
         ref={ref}
-        className="sheet"
+        className={`sheet ${o?.help ? 'sheet-help' : ''}`}
         aria-labelledby="confirm-title"
         onCancel={(e) => {
           e.preventDefault()
@@ -82,7 +86,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
               )}
               <button
                 type="button"
-                className={o.danger ? 'btn btn-danger' : 'btn btn-primary'}
+                className={o.danger ? 'btn btn-danger' : o.help ? 'btn btn-tonal' : 'btn btn-primary'}
                 disabled={blocked}
                 onClick={() => close(true)}
               >
