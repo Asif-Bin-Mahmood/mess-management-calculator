@@ -322,6 +322,10 @@ export function Settings() {
         <p className="card-text">
           Choose a Mess Ledger backup (.json). It is checked before anything changes. A Utilities backup can only replace Utilities, and a Bazar backup only Bazar.
         </p>
+        <p className="card-text" id="single-ledger-note">
+          Members are shared by both ledgers. A single-ledger backup can only be restored while this phone’s members match the backup — an older one made before a member
+          joined or left is refused (nothing changes). Restore a full backup in that case.
+        </p>
         <input
           ref={fileInput}
           type="file"

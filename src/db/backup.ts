@@ -299,11 +299,30 @@ export interface RegistryPlan {
   renamed: { from: string; to: string }[]
   /** Set when a single-ledger restore cannot be done without changing figures; nothing is written. */
   problem: string | null
+  /**
+   * Why: 'other-ledger' = the backup's members would change the other ledger's balances; 'this-ledger' = this
+   * device's members share different months than the backup assumed (e.g. an older backup made before a member
+   * joined or left), so the restored ledger's balances would come out differently.
+   */
+  problemKind: 'other-ledger' | 'this-ledger' | null
+}
+
+const ledgerTitle = (l: LedgerId) => (l === 'utilities' ? 'Utilities' : 'Bazar')
+
+/** The explanation shown when a single-ledger restore is refused (nothing is changed). */
+export function singleLedgerRestoreProblem(kind: 'other-ledger' | 'this-ledger', scope: LedgerId): string {
+  const other: LedgerId = scope === 'utilities' ? 'bazar' : 'utilities'
+  const why =
+    kind === 'other-ledger'
+      ? `This ${ledgerTitle(scope)} backup comes from a household with different members. Restoring it would also change the ${ledgerTitle(other)} balances.`
+      : `The members on this phone share different months than when this ${ledgerTitle(scope)} backup was made (for example, a member joined or left since then), so its balances would come out differently.`
+  return `${why} Members are shared by both ledgers, so a single-ledger backup can only be restored while the members match. Nothing was changed. Restore a full backup (both ledgers) instead.`
 }
 
 function figures(ledger: LedgerId, roster: Roster, txs: readonly Transaction[], closings: readonly MonthClosing[], until: string): string {
   const last = [...txs.filter((t) => t.ledger === ledger).map((t) => t.month), ...closings.filter((c) => c.ledger === ledger).map((c) => c.targetMonth), until].sort().pop()!
-  const pick = (s: MonthSummary) => [s.month, s.remainingCash, s.members.map((m) => [m.memberId, m.share, m.closing])]
+  // Amounts only: a member shown with a ৳0 share and ৳0 balance is the same as a member not shown.
+  const pick = (s: MonthSummary) => [s.month, s.remainingCash, s.unallocatedSpend, s.members.filter((m) => m.share !== 0 || m.closing !== 0).map((m) => [m.memberId, m.share, m.closing]).sort()]
   return JSON.stringify(computeHistory(ledger, roster, txs, last, closings).map(pick))
 }
 
@@ -350,6 +369,7 @@ export function planRegistry(
       categoriesAdded: categories.filter((c) => !local.categories.some((x) => x.id === c.id)).map((c) => c.name),
       renamed,
       problem: null,
+      problemKind: null,
     }
   }
   const members = local.members.map((m) => ({ ...m }))
@@ -380,12 +400,14 @@ export function planRegistry(
   const otherTx = local.transactions.filter((t) => t.ledger === other)
   const otherCl = local.closings.filter((c) => c.ledger === other)
   let problem: string | null = null
+  let problemKind: RegistryPlan['problemKind'] = null
   if (figures(other, local.members, otherTx, otherCl, until) !== figures(other, members, otherTx, otherCl, until)) {
-    problem = `This ${scope === 'utilities' ? 'Utilities' : 'Bazar'} backup comes from a household with different members, and restoring it would change the ${other === 'utilities' ? 'Utilities' : 'Bazar'} balances. Restore a full backup (both ledgers) instead.`
+    problemKind = 'other-ledger'
   } else if (figures(scope, data.members, data.transactions, data.closings, until) !== figures(scope, members, data.transactions, data.closings, until)) {
-    problem = `The members on this device share different months than in the backup, so its ${scope === 'utilities' ? 'Utilities' : 'Bazar'} balances would come out differently. Restore a full backup (both ledgers) instead.`
+    problemKind = 'this-ledger'
   }
-  return { members: members.sort(bySeq), categories: categories.sort(bySeq), membersAdded, categoriesAdded, renamed: [], problem }
+  if (problemKind) problem = singleLedgerRestoreProblem(problemKind, scope)
+  return { members: members.sort(bySeq), categories: categories.sort(bySeq), membersAdded, categoriesAdded, renamed: [], problem, problemKind }
 }
 
 async function localState(database: MessDb) {
