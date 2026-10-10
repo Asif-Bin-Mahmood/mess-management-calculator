@@ -26,7 +26,7 @@ import { formatTaka } from '../../domain/money'
 import { addMonths, currentMonth, isValidMonth, MAX_MONTH, MIN_MONTH, monthLabel } from '../../domain/month'
 import { ledgerName, type LedgerId } from '../../domain/types'
 import { useLeaveGuard } from '../backNav'
-import { Avatar, EmptyState, TopBar } from '../common'
+import { Avatar, EmptyState, InfoButton, TopBar } from '../common'
 import { useApp, useConfirm, useToast } from '../context'
 import { navigate } from '../hooks'
 import { Icon } from '../icons'
@@ -93,7 +93,7 @@ export function Setup() {
       {step === 'count' && (
         <section className="card">
           <h2 className="card-title">How many members share the expenses?</h2>
-          <p className="card-text">Expenses are split equally among the members each month. You can add or remove members later.</p>
+          <p className="card-text">Expenses are split equally. You can change members later.</p>
           <div className="stepper" role="group" aria-label="Number of members">
             <button type="button" className="icon-btn" onClick={() => resize(count - 1)} disabled={count <= 1} aria-label="One fewer member">
               <Icon name="minus" />
@@ -126,7 +126,7 @@ export function Setup() {
       {step === 'names' && (
         <section className="card">
           <h2 className="card-title">Member names</h2>
-          <p className="card-text">Each name must be different. Names can be changed later without affecting any amounts.</p>
+          <p className="card-text">Each name must be different.</p>
           <div className="member-names">
             {names.map((n, i) => (
               <label key={i} className="field">
@@ -162,7 +162,7 @@ export function Setup() {
       {step === 'categories' && (
         <section className="card">
           <h2 className="card-title">Utilities categories</h2>
-          <p className="card-text">Utilities expenses are grouped by category. Keep the suggestions you need, add your own, or skip this and add them later.</p>
+          <p className="card-text">Optional. Used to group Utilities expenses; you can change them later.</p>
           <ul className="check-list">
             {cats.map((c, i) => (
               <li key={c.name}>
@@ -178,7 +178,7 @@ export function Setup() {
               className="input"
               value={newCat}
               maxLength={MAX_NAME}
-              placeholder="Another category, e.g. Water Bill"
+              placeholder="Another category"
               onChange={(e) => setNewCat(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
@@ -218,7 +218,7 @@ export function Setup() {
               <dd>{chosenCats.length ? chosenCats.join(', ') : 'None yet'}</dd>
             </div>
           </dl>
-          <p className="card-text">All members share expenses from the start. Both ledgers, Utilities and Bazar, use this household.</p>
+          <p className="card-text">Everyone shares from the start, in both ledgers.</p>
           <div className="card-actions">
             <button type="button" className="btn btn-ghost" onClick={() => setStep('categories')} disabled={busy}>
               Back
@@ -313,15 +313,14 @@ export function MembersScreen() {
   return (
     <div className="screen">
       <TopBar title="Members" back="settings" />
-      <p className="card-text screen-intro">
-        Members share expenses in whole calendar months, in both ledgers. {open ? `Months up to ${monthLabel(addMonths(open, -1))} are closed, so changes start from ${monthLabel(open)}.` : ''}
-      </p>
-
       <section className="card" aria-labelledby="cur-h">
         <div className="card-head">
-          <h2 id="cur-h" className="card-title">
-            Current members
-          </h2>
+          <span className="card-title-row">
+            <h2 id="cur-h" className="card-title">
+              Current members
+            </h2>
+            <InfoButton topic="members" />
+          </span>
           <span className="card-hint">{current.length}</span>
         </div>
         {current.length === 0 && <EmptyState icon="users" title="No current members">Add a member to record new expenses.</EmptyState>}
@@ -413,7 +412,7 @@ export function MembersScreen() {
             </h2>
             <span className="card-hint">{former.length}</span>
           </div>
-          <p className="card-text">Kept for history and reports. A remaining balance stays visible in its ledger until it is settled.</p>
+          <p className="card-text">Kept in history and reports.</p>
           <ul className="row-list">
             {former.map((m) => {
               const owe = outstanding(m)
@@ -519,7 +518,7 @@ function MemberPanel({
         <label className="field">
           <span className="field-label">Name</span>
           <input className="input" value={name} maxLength={MAX_NAME} autoComplete="off" autoFocus onChange={(e) => setName(e.target.value)} aria-invalid={!!error} />
-          {panel.kind === 'rename' && <span className="field-hint">Only the name changes. Amounts, balances and history stay the same.</span>}
+          {panel.kind === 'rename' && <span className="field-hint">Amounts and history stay the same.</span>}
         </label>
       )}
       {panel.kind !== 'rename' && (
@@ -532,11 +531,13 @@ function MemberPanel({
             min={panel.kind === 'end' ? (open ? addMonths(open, -1) : MIN_MONTH) : (minMonth ?? MIN_MONTH)}
             max={MAX_MONTH}
             onChange={(e) => setMonth(e.target.value)}
-            aria-describedby="panel-month-hint"
+            aria-describedby={open ? 'panel-month-hint' : undefined}
           />
-          <span className="field-hint" id="panel-month-hint">
-            Whole calendar months{isValidMonth(month) ? ` · ${monthLabel(month)}` : ''}.{open ? ` Closed months (up to ${monthLabel(addMonths(open, -1))}) cannot change.` : ''}
-          </span>
+          {open && (
+            <span className="field-hint" id="panel-month-hint">
+              Months up to {monthLabel(addMonths(open, -1))} are closed and cannot change.
+            </span>
+          )}
         </label>
       )}
       {error && <p className="field-error">{error}</p>}
@@ -701,12 +702,14 @@ export function CategoriesScreen() {
   return (
     <div className="screen">
       <TopBar title="Utilities categories" back="settings" />
-      <p className="card-text screen-intro">Categories group Utilities expenses. Renaming changes the name everywhere, including past entries and reports; amounts never change.</p>
       <section className="card" aria-labelledby="cats-h">
         <div className="card-head">
-          <h2 id="cats-h" className="card-title">
-            In use
-          </h2>
+          <span className="card-title-row">
+            <h2 id="cats-h" className="card-title">
+              In use
+            </h2>
+            <InfoButton topic="categories" />
+          </span>
           <span className="card-hint">{active.length}</span>
         </div>
         {active.length === 0 && <EmptyState icon="tag" title="No categories yet">Add one to record Utilities expenses.</EmptyState>}
@@ -716,7 +719,7 @@ export function CategoriesScreen() {
             className="input"
             value={newName}
             maxLength={MAX_NAME}
-            placeholder="New category, e.g. Water Bill"
+            placeholder="New category"
             aria-label="New category name"
             onChange={(e) => setNewName(e.target.value)}
             onKeyDown={async (e) => {
@@ -746,7 +749,7 @@ export function CategoriesScreen() {
             </h2>
             <span className="card-hint">{archived.length}</span>
           </div>
-          <p className="card-text">Not offered for new entries; existing entries and reports keep them.</p>
+          <p className="card-text">Not offered for new entries.</p>
           <ul className="row-list">{archived.map((c) => row(c, true))}</ul>
         </section>
       )}

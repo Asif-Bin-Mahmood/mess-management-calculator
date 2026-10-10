@@ -10,6 +10,9 @@ import {
   restoreBackup,
   undoLastRestore,
   type BackupScope,
+  type BackupSummary,
+  type ImportStatus,
+  type RegistryPlan,
   type RestoreProgress,
 } from '../../db/backup'
 import { lastBackupAtQuery, restoreUndoQuery } from '../queries'
@@ -23,13 +26,15 @@ import { canShareFiles, isNativeApp, saveFile, shareFile } from '../../report/ex
 import { txTitle } from '../../report/reportModel'
 import { useApp } from '../context'
 import { useMutate } from '../useMutate'
-import { TopBar } from '../common'
+import { InfoButton, TopBar } from '../common'
 import { useConfirm, useToast } from '../context'
 import { navigate, useLive } from '../hooks'
 import { Icon } from '../icons'
 import { useInstallPrompt } from '../pwa'
 import { blockBack } from '../backNav'
 import { useUpdates } from '../../update/context'
+
+const scopeName = (sc: BackupScope) => (sc === 'all' ? 'Utilities and Bazar' : `${ledgerName(sc)} only`)
 
 export function Settings() {
   const { txs } = useApp()
@@ -60,7 +65,6 @@ export function Settings() {
   const deleted = (txs ?? []).filter((t) => t.deletedAt !== undefined).sort((a, b) => b.deletedAt! - a.deletedAt!)
   const live = (txs ?? []).length - deleted.length
 
-  const scopeName = (sc: BackupScope) => (sc === 'all' ? 'Utilities and Bazar' : `${ledgerName(sc)} only`)
 
   async function makeBackupFile(): Promise<File> {
     const now = new Date()
@@ -150,85 +154,7 @@ export function Settings() {
     }
     const ok = await confirm({
       title: s.scope === 'all' ? 'Replace all data with this backup?' : `Replace ${ledgerName(s.scope)} data with this backup?`,
-      body: (
-        <>
-          <dl className="kv">
-            <div>
-              <dt>Contains</dt>
-              <dd>{scopeName(s.scope)}</dd>
-            </div>
-            <div>
-              <dt>Backup made</dt>
-              <dd>{s.exportedAt ? new Date(s.exportedAt).toLocaleString('en-GB') : 'unknown'}</dd>
-            </div>
-            <div>
-              <dt>Entries</dt>
-              <dd>
-                {s.transactions} ({s.utilities} Utilities, {s.bazar} Bazar)
-              </dd>
-            </div>
-            {s.deleted > 0 && (
-              <div>
-                <dt>Deleted entries</dt>
-                <dd>{s.deleted}</dd>
-              </div>
-            )}
-            <div>
-              <dt>Month closings</dt>
-              <dd>{s.closings}</dd>
-            </div>
-            <div>
-              <dt>Months</dt>
-              <dd>{s.firstMonth ? `${monthLabel(s.firstMonth)} – ${monthLabel(s.lastMonth!)}` : '—'}</dd>
-            </div>
-            {s.scope === 'all' && (
-              <div>
-                <dt>Members</dt>
-                <dd>{reg.members.map((m) => m.name).join(', ') || '—'}</dd>
-              </div>
-            )}
-            {s.scope === 'all' && reg.renamed.length > 0 && (
-              <div>
-                <dt>Renamed</dt>
-                <dd>{reg.renamed.map((r) => `${r.from} → ${r.to}`).join(', ')}</dd>
-              </div>
-            )}
-            {s.scope !== 'all' && reg.membersAdded.length > 0 && (
-              <div>
-                <dt>Members added</dt>
-                <dd>{reg.membersAdded.join(', ')}</dd>
-              </div>
-            )}
-            {reg.categoriesAdded.length > 0 && (
-              <div>
-                <dt>{s.scope === 'all' ? 'Categories' : 'Categories added'}</dt>
-                <dd>{s.scope === 'all' ? reg.categories.map((c) => c.name).join(', ') : reg.categoriesAdded.join(', ')}</dd>
-              </div>
-            )}
-          </dl>
-          {status.alreadyImportedAt !== null && (
-            <p className="warn">
-              <Icon name="alert" size={18} />
-              <span>This same backup was already restored on {new Date(status.alreadyImportedAt).toLocaleString('en-GB')}. Restoring it again is usually a mistake.</span>
-            </p>
-          )}
-          {status.newerLocalChanges > 0 && (
-            <p className="warn">
-              <Icon name="alert" size={18} />
-              <span>
-                {status.newerLocalChanges} {status.newerLocalChanges === 1 ? 'record was' : 'records were'} changed on this phone after this backup was made and would be lost.
-              </span>
-            </p>
-          )}
-          <p className="warn">
-            <Icon name="alert" size={18} />
-            <span>
-              The {status.localTransactions} {scopeName(s.scope)} entries on this phone will be replaced.
-              {s.scope !== 'all' && ` ${ledgerName(s.scope === 'utilities' ? 'bazar' : 'utilities')} is not touched.`} You can undo this restore afterwards.
-            </span>
-          </p>
-        </>
-      ),
+      body: <RestoreConfirmBody s={s} status={status} reg={reg} />,
       confirmLabel: status.alreadyImportedAt !== null ? 'Restore again anyway' : 'Replace data',
       danger: true,
     })
@@ -285,15 +211,15 @@ export function Settings() {
 
       <section className="card" aria-labelledby="bk-h">
         <div className="card-head">
-          <h2 id="bk-h" className="card-title">
-            Backup
-          </h2>
+          <span className="card-title-row">
+            <h2 id="bk-h" className="card-title">
+              Backup
+            </h2>
+            <InfoButton topic="backup" />
+          </span>
           <span className="card-hint">{lastBackupAt ? `Last: ${new Date(lastBackupAt).toLocaleDateString('en-GB')}` : 'Never backed up'}</span>
         </div>
-        <p className="card-text">
-          Records are saved on this phone and stay after restarts and offline use, but that is not a backup: clearing the browser data, uninstalling, or losing or breaking
-          the phone deletes them. Save a backup file regularly and keep a copy elsewhere (for example Google Drive or your own chat). Month closing never needs a backup file.
-        </p>
+        <p className="card-text">Records are only on this phone. Save a backup file and keep a copy elsewhere.</p>
         <div className="segmented segmented-sm" role="radiogroup" aria-label="What to back up">
           {(['all', 'utilities', 'bazar'] as BackupScope[]).map((sc) => (
             <button key={sc} type="button" role="radio" aria-checked={scope === sc} className={scope === sc ? 'on' : ''} onClick={() => setScope(sc)}>
@@ -315,17 +241,14 @@ export function Settings() {
 
       <section className="card" aria-labelledby="rs-h">
         <div className="card-head">
-          <h2 id="rs-h" className="card-title">
-            Restore
-          </h2>
+          <span className="card-title-row">
+            <h2 id="rs-h" className="card-title">
+              Restore
+            </h2>
+            <InfoButton topic="restore" />
+          </span>
         </div>
-        <p className="card-text">
-          Choose a Mess Ledger backup (.json). It is checked before anything changes. A Utilities backup can only replace Utilities, and a Bazar backup only Bazar.
-        </p>
-        <p className="card-text" id="single-ledger-note">
-          Members are shared by both ledgers. A single-ledger backup can only be restored while this phone’s members match the backup — an older one made before a member
-          joined or left is refused (nothing changes). Restore a full backup in that case.
-        </p>
+        <p className="card-text">Choose a backup file. You see what it contains before anything changes.</p>
         <input
           ref={fileInput}
           type="file"
@@ -440,21 +363,6 @@ export function Settings() {
         )}
       </section>
 
-      <section className="card" aria-labelledby="how-h">
-        <div className="card-head">
-          <h2 id="how-h" className="card-title">
-            How balances work
-          </h2>
-        </div>
-        <ul className="how">
-          <li>Utilities and Bazar are separate ledgers with their own cash and balances.</li>
-          <li>Each month’s spending is split equally among the members sharing that month. Leftover poisha go to one member at a time, rotating monthly.</li>
-          <li>Balance = last month’s balance + paid this month − share. Positive means the member will receive money back; negative means the member is due to pay.</li>
-          <li>Closing balances and cash carry into the next month automatically. The members’ balances always add up to the cash in hand.</li>
-          <li>A member who leaves keeps their balance until it is settled with an entry or a month closing; nothing is moved onto other members.</li>
-        </ul>
-      </section>
-
       <section className="card card-danger" aria-labelledby="dz-h">
         <div className="card-head">
           <h2 id="dz-h" className="card-title">
@@ -540,5 +448,88 @@ function HouseholdCard() {
         </li>
       </ul>
     </section>
+  )
+}
+
+/** What a restore will do, shown before confirming. The data-loss warnings here are always visible. */
+export function RestoreConfirmBody({ s, status, reg }: { s: BackupSummary; status: ImportStatus; reg: RegistryPlan }) {
+  return (
+    <>
+      <dl className="kv">
+        <div>
+          <dt>Contains</dt>
+          <dd>{scopeName(s.scope)}</dd>
+        </div>
+        <div>
+          <dt>Backup made</dt>
+          <dd>{s.exportedAt ? new Date(s.exportedAt).toLocaleString('en-GB') : 'unknown'}</dd>
+        </div>
+        <div>
+          <dt>Entries</dt>
+          <dd>
+            {s.transactions} ({s.utilities} Utilities, {s.bazar} Bazar)
+          </dd>
+        </div>
+        {s.deleted > 0 && (
+          <div>
+            <dt>Deleted entries</dt>
+            <dd>{s.deleted}</dd>
+          </div>
+        )}
+        <div>
+          <dt>Month closings</dt>
+          <dd>{s.closings}</dd>
+        </div>
+        <div>
+          <dt>Months</dt>
+          <dd>{s.firstMonth ? `${monthLabel(s.firstMonth)} – ${monthLabel(s.lastMonth!)}` : '—'}</dd>
+        </div>
+        {s.scope === 'all' && (
+          <div>
+            <dt>Members</dt>
+            <dd>{reg.members.map((m) => m.name).join(', ') || '—'}</dd>
+          </div>
+        )}
+        {s.scope === 'all' && reg.renamed.length > 0 && (
+          <div>
+            <dt>Renamed</dt>
+            <dd>{reg.renamed.map((r) => `${r.from} → ${r.to}`).join(', ')}</dd>
+          </div>
+        )}
+        {s.scope !== 'all' && reg.membersAdded.length > 0 && (
+          <div>
+            <dt>Members added</dt>
+            <dd>{reg.membersAdded.join(', ')}</dd>
+          </div>
+        )}
+        {reg.categoriesAdded.length > 0 && (
+          <div>
+            <dt>{s.scope === 'all' ? 'Categories' : 'Categories added'}</dt>
+            <dd>{s.scope === 'all' ? reg.categories.map((c) => c.name).join(', ') : reg.categoriesAdded.join(', ')}</dd>
+          </div>
+        )}
+      </dl>
+      {status.alreadyImportedAt !== null && (
+        <p className="warn">
+          <Icon name="alert" size={18} />
+          <span>This same backup was already restored on {new Date(status.alreadyImportedAt).toLocaleString('en-GB')}. Restoring it again is usually a mistake.</span>
+        </p>
+      )}
+      {status.newerLocalChanges > 0 && (
+        <p className="warn">
+          <Icon name="alert" size={18} />
+          <span>
+            {status.newerLocalChanges} {status.newerLocalChanges === 1 ? 'record was' : 'records were'} changed on this phone after this backup was made and would be lost.
+          </span>
+        </p>
+      )}
+      <p className="warn">
+        <Icon name="alert" size={18} />
+        <span>
+          The {status.localTransactions} {scopeName(s.scope)} entries on this phone will be replaced.
+          {s.scope !== 'all' && ` ${ledgerName(s.scope === 'utilities' ? 'bazar' : 'utilities')} is not touched.`} You can undo this restore afterwards.
+        </span>
+      </p>
+    </>
   )
 }

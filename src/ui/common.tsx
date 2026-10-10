@@ -7,6 +7,8 @@ import { closingMethodLabel, type LedgerId, type MemberId } from '../domain/type
 import { inRosterOrder, type MemberMap } from '../domain/ledger'
 import { balanceStatus } from '../report/reportModel'
 import { performBack } from './backNav'
+import { useConfirm } from './context'
+import { HELP, openHelp, type HelpTopic } from './help'
 import { navigate } from './hooks'
 import { Icon, type IconName } from './icons'
 
@@ -277,5 +279,25 @@ function ClosedMonthEffect({ e }: { e: ClosingEffectChange }) {
         </p>
       )}
     </div>
+  )
+}
+
+/**
+ * Small information control that opens a help sheet. Icon-only by default (with an accessible name); pass
+ * `text` for a visible link such as “How balances work”. Works with touch, mouse, keyboard and screen readers.
+ */
+export function InfoButton({ topic, text }: { topic: HelpTopic; text?: string }) {
+  const confirm = useConfirm()
+  return (
+    <button
+      type="button"
+      className={text ? 'info-link' : 'info-btn'}
+      aria-label={text ? undefined : HELP[topic].label}
+      aria-haspopup="dialog"
+      onClick={() => void openHelp(confirm, topic)}
+    >
+      <Icon name="info" size={text ? 16 : 20} />
+      {text && <span>{text}</span>}
+    </button>
   )
 }

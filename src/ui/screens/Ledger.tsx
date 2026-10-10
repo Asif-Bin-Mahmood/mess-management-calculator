@@ -6,7 +6,7 @@ import type { Category, CategoryId } from '../../domain/household'
 import { categoryName, ledgerName, memberName, type LedgerId, type Transaction } from '../../domain/types'
 import { balanceStatus, dashboardAlerts, txCashEffect, txTitle } from '../../report/reportModel'
 import { useApp, useConfirm, type ConfirmOptions } from '../context'
-import { Avatar, BalanceTag, EmptyState, Money, MonthSwitcher, TopBar } from '../common'
+import { Avatar, BalanceTag, EmptyState, InfoButton, Money, MonthSwitcher, TopBar } from '../common'
 import { navigate } from '../hooks'
 import { DetailsBody, type DetailsKind } from './LedgerDetails'
 import { MonthStatusRow } from './MonthClosing'
@@ -190,6 +190,7 @@ function Members({ s }: { s: MonthSummary }) {
           </li>
         ))}
       </ul>
+      <InfoButton topic="balances" text="How balances work" />
     </section>
   )
 }
@@ -322,7 +323,7 @@ function History({
       </div>
       {txs.length === 0 ? (
         <EmptyState icon="calendar" title={`No entries in ${monthLabel(month)}`}>
-          Balances carry forward unchanged. Add a contribution or expense below.
+          Add a contribution or expense below.
         </EmptyState>
       ) : shown.length === 0 ? (
         <EmptyState icon="info" title="Nothing matches this filter" />

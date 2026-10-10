@@ -124,13 +124,13 @@ function SignedAmount({
 }
 
 const METHODS: { id: ClosingMethod; title: string; text: string }[] = [
-  { id: 'carry', title: 'Carry forward', text: 'Each member keeps their balance (due or will receive). Cash in hand carries over.' },
+  { id: 'carry', title: 'Carry forward', text: 'Balances and cash carry over.' },
   {
     id: 'settled',
     title: 'Start settled at zero',
-    text: 'Dues and amounts to receive were settled outside the app, or waived. Everyone starts at ৳0. Cash is handled separately.',
+    text: 'Settled outside the app or waived. Everyone starts at ৳0.',
   },
-  { id: 'manual', title: 'Enter verified balances', text: 'Type each member’s agreed opening balance and the counted cash.' },
+  { id: 'manual', title: 'Enter verified balances', text: 'Enter each member’s agreed balance and the counted cash.' },
 ]
 
 export function CloseMonth({ ledger, month }: { ledger: LedgerId; month: string }) {
@@ -205,7 +205,7 @@ export function CloseMonth({ ledger, month }: { ledger: LedgerId; month: string 
             {ledgerName(ledger)} ledger is affected. You can undo this later.
           </p>
           <p className="field-hint">
-            Closing also fixes who shared {monthLabel(month)}. Membership changes (in both ledgers) can then only start from {monthLabel(next)}.
+            Membership changes can then only start from {monthLabel(next)}.
           </p>
           <OpeningTable
             before={closingBalances}
@@ -296,7 +296,7 @@ export function CloseMonth({ ledger, month }: { ledger: LedgerId; month: string 
                 </label>
               ))}
             </div>
-            <p className="field-hint">This is recorded as a non-cash adjustment, not as a contribution or expense.</p>
+            <p className="field-hint">Recorded as an adjustment, not as cash.</p>
           </fieldset>
           <fieldset className="field">
             <legend className="field-label">Opening cash for {monthLabel(next)}</legend>

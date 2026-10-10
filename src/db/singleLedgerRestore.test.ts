@@ -6,6 +6,7 @@ import { legacyCategories, legacyMembers, setHouseholdDisplay } from '../domain/
 import { CATS5, R4 } from '../domain/testUtils'
 import type { Transaction } from '../domain/types'
 import { AppContext, type AppState } from '../ui/context'
+import { HELP } from '../ui/help'
 import { Settings } from '../ui/screens/Settings'
 import { checkBackup, planRestore, restoreBackup, singleLedgerRestoreProblem } from './backup'
 import { MessDb } from './db'
@@ -107,12 +108,14 @@ describe('restoring an older single-ledger backup', () => {
 })
 
 describe('the Backup screen explains the limitation before a file is chosen', () => {
-  it('shows the single-ledger note on the Restore card', () => {
+  it('the Restore card has an information button whose sheet explains the single-ledger limitation', () => {
     setHouseholdDisplay(legacyMembers(), legacyCategories())
     const app: AppState = { txs: [], closings: [], members: R4, categories: CATS5, needsSetup: false, month: '2026-10', setMonth: () => {} }
     const html = renderToStaticMarkup(h(AppContext.Provider, { value: app }, h(Settings)))
-    expect(html).toContain('id="single-ledger-note"')
-    expect(html).toContain('Members are shared by both ledgers')
-    expect(html).toContain('Restore a full backup in that case')
+    expect(html).toContain('aria-label="Restore information"')
+    const help = renderToStaticMarkup(h('div', null, HELP.restore.body))
+    expect(help).toContain('Members are shared by both ledgers')
+    expect(help).toContain('made before a member joined or left, is refused and nothing changes')
+    expect(help).toContain('Restore a full backup in that case')
   })
 })

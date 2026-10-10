@@ -2286,3 +2286,95 @@ body:has(.app-form) .toasts {
 .report-empty {
   text-align: center;
 }
+
+/* ───────── Information controls and help sheets ───────── */
+
+.card-title-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.info-btn {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  margin: -10px 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.info-btn:hover {
+  color: var(--primary);
+  background: var(--primary-tint);
+}
+
+.info-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--primary);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.info-btn:focus-visible,
+.info-link:focus-visible,
+.help-more > summary:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.sheet-help .sheet-content p,
+.help-list li {
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.help-list {
+  margin: 0 0 12px;
+  padding-left: 20px;
+}
+
+.help-list li + li {
+  margin-top: 6px;
+}
+
+.help-example {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.help-more {
+  margin-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.help-more > summary {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--primary);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.help-more[open] > summary {
+  margin-bottom: 4px;
+}
