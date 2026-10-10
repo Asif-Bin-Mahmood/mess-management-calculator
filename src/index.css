@@ -228,6 +228,22 @@ main {
   color: var(--primary);
 }
 
+.eyebrow.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  font-size: 14px;
+}
+
+.brand-mark {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  flex: none;
+}
+
 .home-title {
   font-size: 24px;
   font-weight: 800;

@@ -191,7 +191,7 @@ function layout<T extends CanvasLike>(p: Painter<T>, r: Report, opts: ReportOpti
   const gen = r.generatedAt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
   const sharing = s.sharers.map(memberName)
   const who = sharing.length === 0 ? 'no members sharing' : sharing.length <= 5 ? sharing.join(', ') : `${sharing.length} members sharing`
-  p.text(`Mess Ledger · ${who} · Prepared ${gen}`, M + 34, p.y + 100, { size: 22, color: C.muted, maxW: CONTENT_W - 34 })
+  p.text(`কড়া হিসাব · ${who} · Prepared ${gen}`, M + 34, p.y + 100, { size: 22, color: C.muted, maxW: CONTENT_W - 34 })
   p.y += 140
 
   // ── Financial summary
@@ -340,7 +340,7 @@ function drawFooters(pages: CanvasLike[], r: Report) {
     ctx.font = `500 18px ${REPORT_FONT}`
     ctx.fillStyle = C.faint
     ctx.textAlign = 'left'
-    ctx.fillText(`Mess Ledger · ${r.ledgerName} only · ${r.monthLabel}`, M, c.height - 44)
+    ctx.fillText(`কড়া হিসাব · ${r.ledgerName} only · ${r.monthLabel}`, M, c.height - 44)
     ctx.textAlign = 'right'
     ctx.fillText(`Page ${i + 1} of ${pages.length}`, PAGE_W - M, c.height - 44)
   })

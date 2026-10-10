@@ -15,7 +15,7 @@ Maintainer notes for building, signing and publishing the APK. Accounting rules 
 
 1. Update `version` in `package.json` (`npm version X.Y.Z --no-git-tag-version`), commit and push `main`.
 2. Wait for the **Android APK** workflow to pass.
-3. Tag and push: `git tag -a vX.Y.Z -m "Mess Ledger X.Y.Z"` then `git push origin vX.Y.Z`.
+3. Tag and push: `git tag -a vX.Y.Z -m "কড়া হিসাব X.Y.Z"` then `git push origin vX.Y.Z`.
 
 On a `v*` tag, `.github/workflows/android.yml`:
 

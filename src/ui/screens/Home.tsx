@@ -24,7 +24,10 @@ export function Home() {
     <div className="screen">
       <header className="home-head">
         <div>
-          <p className="eyebrow">Mess Ledger</p>
+          <p className="eyebrow brand">
+            <img className="brand-mark" src="./pwa-192.png" alt="" width={24} height={24} />
+            কড়া হিসাব
+          </p>
           <h1 className="home-title">{householdTitle(members, month)}</h1>
         </div>
       </header>

@@ -19,18 +19,19 @@ export default defineConfig({
       // New versions wait for the user to tap "Reload"; data in IndexedDB is never touched by updates.
       registerType: 'prompt',
       injectRegister: false,
-      includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
+      includeAssets: ['favicon.png', 'apple-touch-icon.png'],
       manifest: {
         id: './',
-        name: 'Mess Ledger — Utilities & Bazar',
-        short_name: 'Mess Ledger',
-        description: 'Offline accounts for a four-member mess: Utilities and Bazar ledgers with monthly reports.',
+        name: 'কড়া হিসাব — Utilities & Bazar',
+        short_name: 'কড়া হিসাব',
+        description: 'Offline accounts for a shared household or mess: Utilities and Bazar ledgers with monthly reports.',
         lang: 'en',
         start_url: './',
         scope: './',
         display: 'standalone',
         orientation: 'portrait',
-        background_color: '#f4f2ec',
+        // Install splash: the logo on its own dark teal (same as the Android launch screen).
+        background_color: '#06212a',
         theme_color: '#1f4d3a',
         categories: ['finance', 'productivity'],
         icons: [

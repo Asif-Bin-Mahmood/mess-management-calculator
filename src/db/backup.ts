@@ -154,9 +154,9 @@ export function checkBackup(text: string): BackupCheck {
   } catch {
     return fail('The file is not valid JSON.')
   }
-  if (typeof raw !== 'object' || raw === null) return fail('The file is not a Mess Ledger backup.')
+  if (typeof raw !== 'object' || raw === null) return fail('The file is not a কড়া হিসাব backup.')
   const b = raw as Partial<BackupFile> & { memberNames?: unknown }
-  if (b.app !== BACKUP_APP) return fail('The file is not a Mess Ledger backup.')
+  if (b.app !== BACKUP_APP) return fail('The file is not a কড়া হিসাব backup.')
   if (typeof b.schemaVersion !== 'number' || !Number.isInteger(b.schemaVersion) || b.schemaVersion < 1) return fail('Unknown backup version.')
   if (b.schemaVersion > BACKUP_SCHEMA_VERSION) return fail('This backup was made by a newer version of the app. Update the app first.')
   const scope: BackupScope = b.schemaVersion === 1 ? 'all' : (b.scope as BackupScope)

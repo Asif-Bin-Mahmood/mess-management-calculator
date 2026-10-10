@@ -47,7 +47,7 @@ const RELEASES_PAGE = `https://github.com/${UPDATE_REPO}/releases`
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
 function manualMessage(r: Exclude<CheckResult, { kind: 'available' }>, installed: string): string {
-  if (r.kind === 'current') return `Mess Ledger is up to date (version ${installed}).`
+  if (r.kind === 'current') return `কড়া হিসাব is up to date (version ${installed}).`
   switch (r.reason) {
     case 'offline':
       return 'You’re offline. Connect to the internet and try again.'
@@ -95,7 +95,7 @@ function NativeUpdates({ children }: { children: ReactNode }) {
         title: 'Allow app updates',
         body: (
           <p>
-            Android needs your permission before Mess Ledger can open the installer. On the next screen, turn on <b>Allow from this source</b>, then
+            Android needs your permission before কড়া হিসাব can open the installer. On the next screen, turn on <b>Allow from this source</b>, then
             return to the app.
           </p>
         ),
@@ -196,7 +196,7 @@ function NativeUpdates({ children }: { children: ReactNode }) {
         const step = await openInstaller(native)
         if (step.kind === 'needs-permission') {
           toast({
-            message: 'Installing updates is still not allowed for Mess Ledger.',
+            message: 'Installing updates is still not allowed for কড়া হিসাব.',
             action: {
               label: 'Settings',
               run: () => {
